@@ -1,0 +1,1046 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <base target="_blank">
+    <title>Vendor Onboarding Automation - Transforming Manual Process</title>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --bg: #fafbfc;
+            --bg-secondary: #ffffff;
+            --text-primary: #1a1a2e;
+            --text-secondary: #4a5568;
+            --accent: #0066ff;
+            --accent-light: #e6f0ff;
+            --success: #00c853;
+            --warning: #ff9800;
+            --danger: #f44336;
+            --border: #e2e8f0;
+        }
+        
+        body.dark-mode {
+            --bg: #0c0e1a;
+            --bg-secondary: #1a1c2e;
+            --text-primary: #e8eaf6;
+            --text-secondary: #a0aec0;
+            --accent: #3b82f6;
+            --accent-light: #1e3a8a;
+            --border: #2d3748;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg);
+            color: var(--text-primary);
+            overflow: hidden;
+            transition: background 0.3s, color 0.3s;
+        }
+        
+        .slide {
+            width: 100vw;
+            height: 100vh;
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 4rem;
+            position: relative;
+            background: var(--bg);
+        }
+        
+        .slide.active {
+            display: flex;
+        }
+        
+        .slide-content {
+            max-width: 1200px;
+            width: 100%;
+            animation: slideIn 0.6s ease-out;
+        }
+        
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        h1 {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 4rem;
+            font-weight: 700;
+            margin-bottom: 1.5rem;
+            background: linear-gradient(135deg, var(--accent), #8b5cf6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            line-height: 1.1;
+        }
+        
+        h2 {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 3rem;
+            font-weight: 600;
+            margin-bottom: 2rem;
+            color: var(--text-primary);
+        }
+        
+        h3 {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 1.8rem;
+            font-weight: 600;
+            margin: 2rem 0 1rem;
+            color: var(--accent);
+        }
+        
+        p {
+            font-size: 1.3rem;
+            line-height: 1.7;
+            color: var(--text-secondary);
+            margin-bottom: 1.5rem;
+        }
+        
+        .subtitle {
+            font-size: 1.5rem;
+            color: var(--text-secondary);
+            margin-bottom: 3rem;
+        }
+        
+        .hero {
+            text-align: center;
+        }
+        
+        .hero h1 {
+            font-size: 5rem;
+            margin-bottom: 2rem;
+        }
+        
+        .hero .subtitle {
+            font-size: 1.8rem;
+            margin-bottom: 1rem;
+        }
+        
+        .meta {
+            font-size: 1.1rem;
+            color: var(--text-secondary);
+            margin-top: 3rem;
+        }
+        
+        ul {
+            list-style: none;
+            padding-left: 0;
+        }
+        
+        li {
+            font-size: 1.3rem;
+            line-height: 1.8;
+            color: var(--text-secondary);
+            margin-bottom: 1rem;
+            padding-left: 2rem;
+            position: relative;
+        }
+        
+        li:before {
+            content: "→";
+            position: absolute;
+            left: 0;
+            color: var(--accent);
+            font-weight: bold;
+        }
+        
+        .two-column {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 3rem;
+            margin-top: 2rem;
+        }
+        
+        .card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 2rem;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+        
+        .card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 12px 24px rgba(0,0,0,0.1);
+        }
+        
+        .card h3 {
+            margin-top: 0;
+            font-size: 1.5rem;
+        }
+        
+        .metric {
+            text-align: center;
+            padding: 2rem;
+        }
+        
+        .metric-value {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 3.5rem;
+            font-weight: 700;
+            color: var(--accent);
+            line-height: 1;
+        }
+        
+        .metric-label {
+            font-size: 1.1rem;
+            color: var(--text-secondary);
+            margin-top: 0.5rem;
+        }
+        
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 2rem;
+            margin: 3rem 0;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 2rem 0;
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        }
+        
+        th {
+            background: var(--accent);
+            color: white;
+            padding: 1.2rem;
+            text-align: left;
+            font-weight: 600;
+            font-size: 1.1rem;
+        }
+        
+        td {
+            padding: 1.2rem;
+            border-bottom: 1px solid var(--border);
+            font-size: 1.1rem;
+        }
+        
+        tr:last-child td {
+            border-bottom: none;
+        }
+        
+        tr:hover {
+            background: var(--accent-light);
+        }
+        
+        .highlight {
+            background: linear-gradient(120deg, var(--accent-light) 0%, var(--accent-light) 100%);
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            font-weight: 600;
+            color: var(--accent);
+        }
+        
+        .code-block {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 1rem;
+            overflow-x: auto;
+            margin: 1.5rem 0;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: var(--border);
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 1rem 0;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent), #8b5cf6);
+            border-radius: 4px;
+            transition: width 1s ease-out;
+        }
+        
+        .slide-number {
+            position: absolute;
+            bottom: 2rem;
+            right: 2rem;
+            font-size: 1rem;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+        
+        .nav-hint {
+            position: absolute;
+            bottom: 2rem;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            text-align: center;
+        }
+        
+        .checkmark {
+            color: var(--success);
+            font-weight: bold;
+            margin-right: 0.5rem;
+        }
+        
+        .cross {
+            color: var(--danger);
+            font-weight: bold;
+            margin-right: 0.5rem;
+        }
+        
+        .warning {
+            color: var(--warning);
+            font-weight: bold;
+            margin-right: 0.5rem;
+        }
+        
+        /* Hamburger Menu Styles */
+        .viz-menu {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            z-index: 1000;
+        }
+        
+        .viz-menu-toggle {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 0.5rem;
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .viz-menu-panel {
+            position: absolute;
+            top: 100%;
+            right: 0;
+            margin-top: 0.5rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 0.5rem;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            display: none;
+            min-width: 200px;
+        }
+        
+        .viz-menu-panel.open {
+            display: block;
+        }
+        
+        .viz-menu-item {
+            display: block;
+            width: 100%;
+            padding: 0.5rem 1rem;
+            background: none;
+            border: none;
+            text-align: left;
+            cursor: pointer;
+            border-radius: 4px;
+            color: var(--text-primary);
+            font-size: 0.9rem;
+        }
+        
+        .viz-menu-item:hover {
+            background: var(--accent-light);
+        }
+    </style>
+</head>
+<body>
+    <!-- INFRA-MENU-HTML -->
+    <nav class="viz-menu">
+        <button class="viz-menu-toggle" onclick="toggleMenu()" aria-label="Menu">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="3" y1="12" x2="21" y2="12"></line>
+                <line x1="3" y1="6" x2="21" y2="6"></line>
+                <line x1="3" y1="18" x2="21" y2="18"></line>
+            </svg>
+        </button>
+        <div class="viz-menu-panel" id="vizMenuPanel">
+            <button class="viz-menu-item" onclick="toggleTheme()">Toggle Theme</button>
+            <button class="viz-menu-item" onclick="toggleFullscreen()">Fullscreen</button>
+            <button class="viz-menu-item" onclick="saveAsImage()">Save as Image</button>
+        </div>
+    </nav>
+
+    <!-- Slide 1: Title -->
+    <div class="slide active" id="slide-1">
+        <div class="slide-content hero">
+            <h1>Vendor Onboarding Automation</h1>
+            <p class="subtitle">Transforming Manual Process into Intelligent Workflow</p>
+            <div class="meta">
+                <p><strong>Presented by</strong>: Vendor Onboarding Automation Team</p>
+                <p><strong>Date</strong>: 2026</p>
+            </div>
+        </div>
+        <div class="slide-number">1 / 14</div>
+        <div class="nav-hint">Use ← → arrow keys or Space to navigate</div>
+    </div>
+
+    <!-- Slide 2: The Problem -->
+    <div class="slide" id="slide-2">
+        <div class="slide-content">
+            <h2>The Problem: Manual Vendor Onboarding is Broken</h2>
+            <div class="two-column">
+                <div>
+                    <h3>⏱️ Time Consuming</h3>
+                    <ul>
+                        <li>40+ hours per vendor onboarding</li>
+                        <li>8+ forms across 7 disconnected systems</li>
+                        <li>Repeated data entry</li>
+                    </ul>
+                    <h3>👁️ Lack of Visibility</h3>
+                    <ul>
+                        <li>No unified tracking</li>
+                        <li>Manual status checking</li>
+                        <li>No completion estimates</li>
+                    </ul>
+                </div>
+                <div>
+                    <h3>❌ Error Prone</h3>
+                    <ul>
+                        <li>30% error rate requiring rework</li>
+                        <li>Duplicate supplier creation</li>
+                        <li>Missing dependencies</li>
+                    </ul>
+                    <h3>🧠 Complex Knowledge</h3>
+                    <ul>
+                        <li>Which forms in which order?</li>
+                        <li>Different processes per vendor type</li>
+                        <li>Tribal knowledge not documented</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+        <div class="slide-number">2 / 14</div>
+    </div>
+
+    <!-- Slide 3: The Impact -->
+    <div class="slide" id="slide-3">
+        <div class="slide-content">
+            <h2>The Impact: Real Numbers</h2>
+            <h3>Time Breakdown (Per Vendor)</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Activity</th>
+                        <th>Manual</th>
+                        <th>Automated</th>
+                        <th>Savings</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Data Collection</td>
+                        <td>2 hours</td>
+                        <td>10 min</td>
+                        <td><span class="highlight">92%</span></td>
+                    </tr>
+                    <tr>
+                        <td>Form Submission</td>
+                        <td>4 hours</td>
+                        <td>0 min</td>
+                        <td><span class="highlight">100%</span></td>
+                    </tr>
+                    <tr>
+                        <td>Status Checking</td>
+                        <td>1 hr/day</td>
+                        <td>0 min</td>
+                        <td><span class="highlight">100%</span></td>
+                    </tr>
+                    <tr>
+                        <td>Error Correction</td>
+                        <td>2 hours</td>
+                        <td>10 min</td>
+                        <td><span class="highlight">92%</span></td>
+                    </tr>
+                    <tr style="font-weight: bold; background: var(--accent-light);">
+                        <td><strong>Total</strong></td>
+                        <td><strong>40 hours</strong></td>
+                        <td><strong>2 hours</strong></td>
+                        <td><span class="highlight">95%</span></td>
+                    </tr>
+                </tbody>
+            </table>
+            <div class="metrics-grid">
+                <div class="metric">
+                    <div class="metric-value">1,900</div>
+                    <div class="metric-label">Hours Saved/Year</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-value">$200K</div>
+                    <div class="metric-label">Cost Savings</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-value">~1</div>
+                    <div class="metric-label">FTE Equivalent</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-value">2x</div>
+                    <div class="metric-label">Faster Onboarding</div>
+                </div>
+            </div>
+        </div>
+        <div class="slide-number">3 / 14</div>
+    </div>
+
+    <!-- Slide 4: The Solution -->
+    <div class="slide" id="slide-4">
+        <div class="slide-content">
+            <h2>The Solution: Intelligent Automation</h2>
+            <div style="text-align: center; margin: 3rem 0;">
+                <p style="font-size: 2rem; font-weight: 600; color: var(--accent);">
+                    "Enter data once, automate everything"
+                </p>
+                <p style="font-size: 1.3rem; margin-top: 1rem;">
+                    Single intake form → Automated orchestration across all systems
+                </p>
+            </div>
+            <div class="two-column">
+                <div class="card">
+                    <h3>1. Unified Intake</h3>
+                    <ul>
+                        <li>One form for entire workflow</li>
+                        <li>Smart prompts by vendor type</li>
+                        <li>Real-time validation</li>
+                    </ul>
+                </div>
+                <div class="card">
+                    <h3>2. Intelligent Orchestration</h3>
+                    <ul>
+                        <li>Optimal execution order</li>
+                        <li>Parallel processing</li>
+                        <li>Dependency handling</li>
+                    </ul>
+                </div>
+                <div class="card">
+                    <h3>3. System Integration</h3>
+                    <ul>
+                        <li>Butterfly Forms API (5 forms)</li>
+                        <li>CSC Browser Automation</li>
+                        <li>Buy@, AMP, TPA integration</li>
+                    </ul>
+                </div>
+                <div class="card">
+                    <h3>4. Real-Time Visibility</h3>
+                    <ul>
+                        <li>Dashboard with live status</li>
+                        <li>Proactive notifications</li>
+                        <li>Completion estimates</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+        <div class="slide-number">4 / 14</div>
+    </div>
+
+    <!-- Slide 5: Architecture -->
+    <div class="slide" id="slide-5">
+        <div class="slide-content">
+            <h2>Architecture Overview</h2>
+            <div class="code-block" style="font-size: 0.9rem; line-height: 1.4;">
+┌─────────────────────────────────────────────────────────┐
+│              User Interface Layer                        │
+│  CLI Tool  │  Web UI  │  Monitoring Dashboard            │
+└────────────┴──────────┴──────────────────────────────────┘
+                        │
+┌───────────────────────▼──────────────────────────────────┐
+│           Orchestration Engine                           │
+│  • State Machine  • Dependency Graph  • Retry Logic      │
+└───────────┬──────────────────┬─────────────┬─────────────┘
+            │                  │             │
+    ┌───────▼──────┐   ┌──────▼──────┐  ┌───▼────────┐
+    │  Butterfly   │   │     CSC     │  │    AMP     │
+    │  API Adapter │   │  Browser    │  │  Browser   │
+    └───────┬──────┘   └──────┬──────┘  └────┬───────┘
+            │                 │              │
+    ┌───────▼──────┐   ┌──────▼──────┐  ┌───▼────────┐
+    │     TPA      │   │    Buy@     │  │Notifications│
+    │  API Adapter │   │   Browser   │  │             │
+    └──────────────┘   └─────────────┘  └─────────────┘
+            </div>
+            <h3>Technology Stack</h3>
+            <ul>
+                <li><strong>Backend</strong>: Python 3.12, Playwright (browser automation)</li>
+                <li><strong>State Management</strong>: SQLite (persistent, survives restarts)</li>
+                <li><strong>APIs</strong>: Butterfly Forms API, TPA API</li>
+                <li><strong>Testing</strong>: pytest with 95%+ coverage</li>
+                <li><strong>Documentation</strong>: User manuals with step-by-step guides</li>
+            </ul>
+        </div>
+        <div class="slide-number">5 / 14</div>
+    </div>
+
+    <!-- Slide 6: User Journey -->
+    <div class="slide" id="slide-6">
+        <div class="slide-content">
+            <h2>How It Works: User Journey</h2>
+            <h3>Step 1: Initiate (1 minute)</h3>
+            <div class="code-block">
+vendor-onboard --interactive
+# Or use config file for repeatable onboardings:
+vendor-onboard --config acme-corp.json
+            </div>
+            <h3>Step 2: Single Intake (10 minutes)</h3>
+            <p>System collects all needed information:</p>
+            <ul>
+                <li>✓ Supplier details (name, contact, justification)</li>
+                <li>✓ Contract information (dates, value, scope)</li>
+                <li>✓ Worker details (names, emails, roles, locations)</li>
+                <li>✓ Access requirements (systems, groups)</li>
+                <li>✓ YubiKey needs (shipping, urgency)</li>
+            </ul>
+            <p style="margin-top: 1.5rem;"><strong>Smart Features</strong>:</p>
+            <ul>
+                <li>Progressive disclosure (only relevant questions)</li>
+                <li>Real-time validation</li>
+                <li>Duplicate supplier detection</li>
+            </ul>
+        </div>
+        <div class="slide-number">6 / 14</div>
+    </div>
+
+    <!-- Slide 7: Automated Execution -->
+    <div class="slide" id="slide-7">
+        <div class="slide-content">
+            <h2>How It Works: Automated Execution</h2>
+            <h3>Step 3: Validation (1 minute)</h3>
+            <p>System validates all data:</p>
+            <ul>
+                <li>✓ Email formats</li>
+                <li>✓ Date ranges (end > start)</li>
+                <li>✓ Required fields</li>
+                <li>✓ Supplier existence in Buy@</li>
+            </ul>
+            <p><strong>Result</strong>: Clear error messages with fix instructions</p>
+            
+            <h3>Step 4: Automated Workflow (Hours to Days)</h3>
+            <p>Orchestrator executes in optimal order:</p>
+            <div class="two-column">
+                <div>
+                    <p><strong>Parallel Execution</strong> (independent):</p>
+                    <div class="code-block" style="font-size: 0.9rem;">
+├─► Verify Supplier in Buy@
+├─► Submit YubiKey Request
+├─► Submit Statement of Work
+├─► Initiate TPA Assessment
+└─► Create AMP Group
+                    </div>
+                </div>
+                <div>
+                    <p><strong>Sequential</strong> (dependent):</p>
+                    <div class="code-block" style="font-size: 0.9rem;">
+└─► Update CSC Profile
+    └─► Onboard Workers
+    </div>
+                </div>
+            </div>
+        </div>
+        <div class="slide-number">7 / 14</div>
+    </div>
+
+    <!-- Slide 8: Monitoring -->
+    <div class="slide" id="slide-8">
+        <div class="slide-content">
+            <h2>How It Works: Monitoring</h2>
+            <h3>Step 5: Real-Time Visibility</h3>
+            <div class="two-column">
+                <div>
+                    <p><strong>Dashboard Shows</strong>:</p>
+                    <ul>
+                        <li>Current status of each step</li>
+                        <li>Running, pending, completed steps</li>
+                        <li>Estimated completion time</li>
+                        <li>Blockers requiring attention</li>
+                    </ul>
+                </div>
+                <div>
+                    <p><strong>Notifications</strong>:</p>
+                    <ul>
+                        <li>📧 Email on workflow start/complete</li>
+                        <li>💬 Workplace on milestones</li>
+                        <li>⚠️ Alert if manual intervention needed</li>
+                        <li>📊 Daily summary for active onboardings</li>
+                    </ul>
+                </div>
+            </div>
+            <h3>Example Notification</h3>
+            <div class="code-block">
+✓ Vendor Onboarding Update: Acme Corp
+
+Status: 6 of 9 steps completed (67%)
+- ✓ Supplier verified (Active in Buy@)
+- ✓ YubiKey request submitted (Tracking: 1Z999AA1)
+- ✓ Statement of Work approved
+- ⏳ TPA Assessment in progress (Est. 2 days)
+- ⏳ AMP group creation pending
+- ⏳ CSC worker onboarding pending
+
+Estimated completion: April 15, 2024
+View details: [Dashboard Link]
+            </div>
+        </div>
+        <div class="slide-number">8 / 14</div>
+    </div>
+
+    <!-- Slide 9: User-Friendly Design -->
+    <div class="slide" id="slide-9">
+        <div class="slide-content">
+            <h2>Key Features: User-Friendly Design</h2>
+            <div class="two-column">
+                <div class="card">
+                    <h3>1. Single Intake</h3>
+                    <p><span class="cross">❌ Before:</span> Fill out same info 8+ times</p>
+                    <p><span class="checkmark">✓ After:</span> Enter once, auto-populates all forms</p>
+                </div>
+                <div class="card">
+                    <h3>2. Intelligent Validation</h3>
+                    <p><span class="cross">❌ Before:</span> Submit, wait days, discover error</p>
+                    <p><span class="checkmark">✓ After:</span> Real-time validation with fix instructions</p>
+                </div>
+                <div class="card">
+                    <h3>3. Duplicate Prevention</h3>
+                    <p><span class="cross">❌ Before:</span> Create duplicate suppliers</p>
+                    <p><span class="checkmark">✓ After:</span> Checks Buy@ first, skips if active</p>
+                </div>
+                <div class="card">
+                    <h3>4. Progress Transparency</h3>
+                    <p><span class="cross">❌ Before:</span> "What's the status?"</p>
+                    <p><span class="checkmark">✓ After:</span> Real-time dashboard updates</p>
+                </div>
+            </div>
+            <h3>Example Error Message</h3>
+            <div class="code-block" style="border-left: 4px solid var(--danger);">
+❌ Email Address 'john@vendor' is invalid.
+   Please enter a valid email format (e.g., worker@company.com).
+            </div>
+        </div>
+        <div class="slide-number">9 / 14</div>
+    </div>
+
+    <!-- Slide 10: Benefits -->
+    <div class="slide" id="slide-10">
+        <div class="slide-content">
+            <h2>Benefits Summary</h2>
+            <div class="two-column">
+                <div>
+                    <h3>For Requestors (You!)</h3>
+                    <ul>
+                        <li><span class="checkmark">✓</span> <strong>95% time savings</strong> - 2 hours instead of 40</li>
+                        <li><span class="checkmark">✓</span> <strong>Single intake</strong> - Enter data once, not 8 times</li>
+                        <li><span class="checkmark">✓</span> <strong>Real-time visibility</strong> - Know exactly where things stand</li>
+                        <li><span class="checkmark">✓</span> <strong>Proactive notifications</strong> - Stay informed without checking</li>
+                        <li><span class="checkmark">✓</span> <strong>Error prevention</strong> - Validation catches issues upfront</li>
+                        <li><span class="checkmark">✓</span> <strong>No expertise needed</strong> - System knows which forms to fill</li>
+                    </ul>
+                </div>
+                <div>
+                    <h3>For Meta</h3>
+                    <ul>
+                        <li><span class="checkmark">✓</span> <strong>Cost savings</strong> - $200K/year for 50 onboardings</li>
+                        <li><span class="checkmark">✓</span> <strong>Faster onboarding</strong> - Vendors productive in days, not weeks</li>
+                        <li><span class="checkmark">✓</span> <strong>Compliance</strong> - Complete audit trail for every action</li>
+                        <li><span class="checkmark">✓</span> <strong>Scalability</strong> - Handle increased volume without more staff</li>
+                        <li><span class="checkmark">✓</span> <strong>Consistency</strong> - Same process every time, no variations</li>
+                        <li><span class="checkmark">✓</span> <strong>Data quality</strong> - Validation ensures complete, accurate data</li>
+                    </ul>
+                </div>
+            </div>
+            <div style="margin-top: 2rem; padding: 1.5rem; background: var(--accent-light); border-radius: 12px;">
+                <h3 style="margin-top: 0;">For Vendors</h3>
+                <p style="margin-bottom: 0;">
+                    <span class="checkmark">✓</span> Faster access • 
+                    <span class="checkmark">✓</span> Fewer delays • 
+                    <span class="checkmark">✓</span> Clear expectations • 
+                    <span class="checkmark">✓</span> Better experience
+                </p>
+            </div>
+        </div>
+        <div class="slide-number">10 / 14</div>
+    </div>
+
+    <!-- Slide 11: Implementation Status -->
+    <div class="slide" id="slide-11">
+        <div class="slide-content">
+            <h2>Implementation Status</h2>
+            <div style="margin: 2rem 0;">
+                <div style="margin-bottom: 2rem;">
+                    <h3><span class="checkmark">✓</span> Phase 1: Foundation (Complete)</h3>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: 100%;"></div>
+                    </div>
+                    <ul style="margin-top: 1rem;">
+                        <li>Project structure and Git setup</li>
+                        <li>Butterfly Forms API client (5 forms)</li>
+                        <li>Workflow orchestrator with state management</li>
+                        <li>CLI intake tool with validation</li>
+                        <li>Form schemas configuration</li>
+                    </ul>
+                </div>
+                <div style="margin-bottom: 2rem;">
+                    <h3><span class="checkmark">✓</span> Phase 2: CSC Automation (Complete)</h3>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: 100%;"></div>
+                    </div>
+                    <ul style="margin-top: 1rem;">
+                        <li>CSC browser automation (Playwright)</li>
+                        <li>Individual worker onboarding</li>
+                        <li>Spreadsheet generator with user-friendly formatting</li>
+                        <li>Bulk upload via spreadsheet</li>
+                        <li>Data validator with clear error messages</li>
+                    </ul>
+                </div>
+                <div style="margin-bottom: 2rem;">
+                    <h3><span class="warning">⏳</span> Phase 3: AMP & TPA Integration (In Progress)</h3>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: 40%;"></div>
+                    </div>
+                    <ul style="margin-top: 1rem;">
+                        <li>AMP browser automation for group management</li>
+                        <li>TPA API integration for security assessments</li>
+                        <li>Buy@ supplier verification enhancements</li>
+                    </ul>
+                </div>
+                <div>
+                    <h3>📋 Phase 4: Web UI & Monitoring (Planned)</h3>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: 0%;"></div>
+                    </div>
+                    <ul style="margin-top: 1rem;">
+                        <li>React-based web intake form</li>
+                        <li>Real-time monitoring dashboard</li>
+                        <li>Workplace bot notifications</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+        <div class="slide-number">11 / 14</div>
+    </div>
+
+    <!-- Slide 12: ROI Analysis -->
+    <div class="slide" id="slide-12">
+        <div class="slide-content">
+            <h2>ROI Analysis</h2>
+            <div class="two-column">
+                <div>
+                    <h3>Investment</h3>
+                    <ul>
+                        <li><strong>Development</strong>: 12 weeks (3 engineers)</li>
+                        <li><strong>Infrastructure</strong>: Minimal (existing Meta systems)</li>
+                        <li><strong>Maintenance</strong>: ~20% annually</li>
+                    </ul>
+                    <div class="card" style="margin-top: 2rem; text-align: center;">
+                        <div class="metric-value" style="font-size: 2.5rem;">$60K</div>
+                        <div class="metric-label">Estimated Development Cost</div>
+                    </div>
+                </div>
+                <div>
+                    <h3>Returns (Year 1, 50 onboardings)</h3>
+                    <p><strong>Direct Savings</strong>:</p>
+                    <ul>
+                        <li>Time saved: 1,900 hours</li>
+                        <li>Cost saved: $190,000 (at $100/hour)</li>
+                        <li><strong>ROI: 300%+</strong></li>
+                    </ul>
+                    <p style="margin-top: 1.5rem;"><strong>Indirect Benefits</strong>:</p>
+                    <ul>
+                        <li>Faster vendor productivity (2 weeks earlier)</li>
+                        <li>Reduced error-related delays</li>
+                        <li>Improved vendor satisfaction</li>
+                        <li>Better compliance and audit readiness</li>
+                    </ul>
+                </div>
+            </div>
+            <div style="margin-top: 3rem; text-align: center; padding: 2rem; background: linear-gradient(135deg, var(--accent-light), #e0e7ff); border-radius: 16px;">
+                <h3 style="margin: 0; color: var(--accent);">Break-Even: After ~15 vendor onboardings</h3>
+            </div>
+        </div>
+        <div class="slide-number">12 / 14</div>
+    </div>
+
+    <!-- Slide 13: Next Steps -->
+    <div class="slide" id="slide-13">
+        <div class="slide-content">
+            <h2>Next Steps</h2>
+            <div class="two-column">
+                <div class="card">
+                    <h3>For Leadership</h3>
+                    <ol style="padding-left: 1.5rem;">
+                        <li style="margin-bottom: 1rem;"><strong>Approve Phase 3 & 4 funding</strong> to complete the solution</li>
+                        <li style="margin-bottom: 1rem;"><strong>Designate pilot users</strong> for early feedback</li>
+                        <li><strong>Define success metrics</strong> and tracking approach</li>
+                    </ol>
+                </div>
+                <div class="card">
+                    <h3>For Implementation Team</h3>
+                    <ol style="padding-left: 1.5rem;">
+                        <li style="margin-bottom: 1rem;"><strong>Complete Phase 3</strong> (AMP & TPA) - Weeks 7-9</li>
+                        <li style="margin-bottom: 1rem;"><strong>Build Phase 4</strong> (Web UI & Dashboard) - Weeks 10-12</li>
+                        <li style="margin-bottom: 1rem;"><strong>Create user documentation</strong> and training materials</li>
+                        <li><strong>Pilot with 5-10 onboardings</strong> to gather feedback</li>
+                    </ol>
+                </div>
+            </div>
+            <div class="card" style="margin-top: 2rem;">
+                <h3>For Users</h3>
+                <div class="two-column" style="margin-top: 1rem;">
+                    <ul>
+                        <li><strong>Review the CLI tool</strong> - Try the interactive intake</li>
+                        <li><strong>Provide feedback</strong> on user experience</li>
+                    </ul>
+                    <ul>
+                        <li><strong>Identify pilot candidates</strong> - Vendors ready for onboarding</li>
+                        <li><strong>Join the beta program</strong> - Get early access</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+        <div class="slide-number">13 / 14</div>
+    </div>
+
+    <!-- Slide 14: Thank You -->
+    <div class="slide" id="slide-14">
+        <div class="slide-content hero">
+            <h1>Thank You!</h1>
+            <p class="subtitle" style="font-size: 2rem; margin: 3rem 0;">
+                Let's Transform Vendor Onboarding Together
+            </p>
+            <div style="margin: 4rem 0; font-size: 1.4rem; line-height: 2;">
+                <p><strong>From</strong>: Manual, fragmented, time-consuming process</p>
+                <p style="font-size: 2rem; margin: 1rem 0;">↓</p>
+                <p><strong>To</strong>: Automated, unified, user-friendly workflow</p>
+            </div>
+            <p style="font-size: 1.6rem; color: var(--accent); font-weight: 600; margin-top: 3rem;">
+                The future of vendor onboarding is here. Let's build it.
+            </p>
+            <div class="meta" style="margin-top: 4rem;">
+                <p><strong>Contact</strong>: Igor Kosoy (ikosoy@meta.com)</p>
+                <p><strong>Documentation</strong>: Available in project repository</p>
+                <p><strong>Demo</strong>: Run scripts/verify_csc_automation.py</p>
+            </div>
+        </div>
+        <div class="slide-number">14 / 14</div>
+    </div>
+
+    <!-- INFRA-MENU-JS -->
+    <script>
+        let currentSlide = 1;
+        const totalSlides = 14;
+        
+        function showSlide(n) {
+            const slides = document.getElementsByClassName('slide');
+            if (n > totalSlides) currentSlide = 1;
+            if (n < 1) currentSlide = totalSlides;
+            
+            for (let i = 0; i < slides.length; i++) {
+                slides[i].classList.remove('active');
+            }
+            
+            slides[currentSlide - 1].classList.add('active');
+            window.location.hash = currentSlide;
+        }
+        
+        function changeSlide(n) {
+            showSlide(currentSlide += n);
+        }
+        
+        function goToSlide(n) {
+            currentSlide = n;
+            showSlide(currentSlide);
+        }
+        
+        // Keyboard navigation
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'ArrowRight' || event.key === ' ') {
+                event.preventDefault();
+                changeSlide(1);
+            } else if (event.key === 'ArrowLeft') {
+                event.preventDefault();
+                changeSlide(-1);
+            } else if (event.key === 'Home') {
+                event.preventDefault();
+                goToSlide(1);
+            } else if (event.key === 'End') {
+                event.preventDefault();
+                goToSlide(totalSlides);
+            }
+        });
+        
+        // Initialize from hash
+        window.addEventListener('load', function() {
+            const hash = window.location.hash.replace('#', '');
+            if (hash) {
+                const slideNum = parseInt(hash);
+                if (slideNum >= 1 && slideNum <= totalSlides) {
+                    goToSlide(slideNum);
+                }
+            }
+        });
+        
+        // Menu functions
+        function toggleMenu() {
+            const panel = document.getElementById('vizMenuPanel');
+            panel.classList.toggle('open');
+        }
+        
+        function toggleTheme() {
+            document.body.classList.toggle('dark-mode');
+            localStorage.setItem('theme', document.body.classList.contains('dark-mode') ? 'dark' : 'light');
+        }
+        
+        function toggleFullscreen() {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen();
+            } else {
+                document.exitFullscreen();
+            }
+        }
+        
+        function saveAsImage() {
+            alert('Save as Image: Use browser screenshot or print to PDF');
+        }
+        
+        // Load saved theme
+        if (localStorage.getItem('theme') === 'dark') {
+            document.body.classList.add('dark-mode');
+        }
+        
+        // Close menu when clicking outside
+        document.addEventListener('click', function(event) {
+            const menu = document.querySelector('.viz-menu');
+            if (!menu.contains(event.target)) {
+                document.getElementById('vizMenuPanel').classList.remove('open');
+            }
+        });
+    </script>
+</body>
+</html>
