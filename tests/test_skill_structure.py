@@ -36,3 +36,12 @@ def test_skill_has_usage_section():
     content = skill_path.read_text()
     assert "## Usage" in content
     assert "Starting a New Onboarding" in content
+
+
+def test_skill_has_system_integrations():
+    """Test that skill file contains System Integrations section."""
+    skill_path = Path.home() / ".llms" / "skills" / "vendor-onboarding" / "SKILL.md"
+    content = skill_path.read_text()
+    assert "## System Integrations" in content
+    assert "Buy@" in content
+    assert "Butterfly" in content
