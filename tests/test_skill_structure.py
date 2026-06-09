@@ -27,4 +27,12 @@ def test_skill_has_workflow_section():
     skill_path = Path.home() / ".llms" / "skills" / "vendor-onboarding" / "SKILL.md"
     content = skill_path.read_text()
     assert "## Workflow" in content
-    assert "Phase 1" in content
+    assert "Phase 1:" in content
+
+
+def test_skill_has_usage_section():
+    """Test that skill file contains Usage section."""
+    skill_path = Path.home() / ".llms" / "skills" / "vendor-onboarding" / "SKILL.md"
+    content = skill_path.read_text()
+    assert "## Usage" in content
+    assert "Starting a New Onboarding" in content
