@@ -132,17 +132,28 @@ class WorkflowOrchestrator:
         logger.debug(f"Added step {step_id}: {name}")
     
     def _get_ready_steps(self) -> List[WorkflowStep]:
-        """Get steps that are ready to execute (dependencies satisfied)."""
+        """Get steps that are ready to execute (dependencies satisfied).
+        
+        Validates that all dependencies exist before checking status.
+        Raises ValueError if a dependency is referenced but not found.
+        """
         ready = []
         for step in self.steps.values():
             if step.status != StepStatus.PENDING:
                 continue
             
+            # Validate all dependencies exist
+            for dep_id in step.dependencies:
+                if dep_id not in self.steps:
+                    raise ValueError(
+                        f"Step '{step.step_id}' depends on '{dep_id}' which does not exist. "
+                        f"Available steps: {list(self.steps.keys())}"
+                    )
+            
             # Check if all dependencies are completed
             deps_satisfied = all(
                 self.steps[dep_id].status == StepStatus.COMPLETED
                 for dep_id in step.dependencies
-                if dep_id in self.steps
             )
             
             if deps_satisfied:

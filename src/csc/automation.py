@@ -48,24 +48,78 @@ class CSCAutomation:
     
     Automates CSC UI interactions for onboarding individual vendor workers
     and bulk uploads via spreadsheet.
+    
+    Browser lifecycle is managed explicitly via start() and close() methods
+    to ensure the browser stays alive across multiple operations.
     """
     
     CSC_URL = "https://www.internalfb.com/csc"
     LOGIN_TIMEOUT = 30000  # 30 seconds
     
-    def __init__(self, headless: bool = True, screenshot_dir: str = "/tmp/csc_screenshots"):
+    def __init__(self, headless: bool = True, screenshot_dir: str = None):
         """Initialize CSC automation.
         
         Args:
             headless: Whether to run browser in headless mode
-            screenshot_dir: Directory to save error screenshots
+            screenshot_dir: Directory to save error screenshots.
+                          Defaults to ~/.vendor_onboarding/screenshots with 0700 permissions
         """
         self.headless = headless
+        # Use secure default location with restricted permissions
+        if screenshot_dir is None:
+            screenshot_dir = Path.home() / ".vendor_onboarding" / "screenshots"
         self.screenshot_dir = Path(screenshot_dir)
-        self.screenshot_dir.mkdir(parents=True, exist_ok=True)
+        self.screenshot_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        self._playwright = None
         self._browser = None
         self._page = None
         self._logged_in = False
+    
+    def _sanitize_email(self, email: str) -> str:
+        """Sanitize email for logging (mask PII).
+        
+        Args:
+            email: Email address to sanitize
+            
+        Returns:
+            Sanitized email (e.g., 'john.doe@vendor.com' -> 'j***@vendor.com')
+        """
+        if not email or '@' not in email:
+            return '***'
+        local, domain = email.split('@', 1)
+        if len(local) <= 1:
+            return f'***@{domain}'
+        return f'{local[0]}***@{domain}'
+    
+    def start(self):
+        """Start the browser session.
+        
+        Must be called before login() and other operations.
+        Browser will stay alive until close() is called.
+        """
+        if self._browser is not None:
+            logger.warning("Browser already started")
+            return
+        
+        logger.info("Starting browser session")
+        self._playwright = sync_playwright().start()
+        self._browser = self._playwright.chromium.launch(headless=self.headless)
+        self._page = self._browser.new_page()
+    
+    def close(self):
+        """Close browser resources.
+        
+        Should be called when done with all operations.
+        """
+        if self._browser:
+            logger.info("Closing browser session")
+            self._browser.close()
+            self._browser = None
+            self._page = None
+            self._logged_in = False
+        if self._playwright:
+            self._playwright.stop()
+            self._playwright = None
     
     def _take_screenshot(self, page, prefix: str = "error"):
         """Take screenshot for debugging."""
@@ -77,68 +131,90 @@ class CSCAutomation:
             logger.info(f"Screenshot saved to {filepath}")
             return str(filepath)
         except Exception as e:
-            logger.warning(f"Failed to take screenshot: {e}")
-            return None
-    
+            sanitized = self._sanitize_email(worker.email)
+            self._take_screenshot(self._page, f"onboard_error_{sanitized}")
+            logger.error(f"Failed to onboard worker {sanitized}: {e}")
+            raise FormSubmissionError(f"Worker onboarding failed: {e}")
     def login(self) -> bool:
-        """Login to CSC via SSO."""
+        """Login to CSC via SSO.
+        
+        Browser must be started via start() before calling login().
+        Uses the requestor's existing SSO session.
+        
+        Returns:
+            True if login successful
+            
+        Raises:
+            AuthenticationError: If login fails
+            CSCError: If browser not started
+        """
+        if self._page is None:
+            raise CSCError("Browser not started. Call start() before login().")
+        
         logger.info("Logging in to CSC via SSO")
         
         try:
-            with sync_playwright() as p:
-                self._browser = p.chromium.launch(headless=self.headless)
-                self._page = self._browser.new_page()
-                
-                try:
-                    # Navigate to CSC
-                    self._page.goto(self.CSC_URL, wait_until="networkidle", timeout=self.LOGIN_TIMEOUT)
-                    
-                    # Check if already logged in (SSO session active)
-                    # Look for CSC dashboard elements
-                    try:
-                        self._page.wait_for_selector(
-                            'text=/dashboard|welcome|home/i',
-                            timeout=5000
-                        )
-                        logger.info("Already logged in via SSO")
-                        self._logged_in = True
-                        return True
-                    except PlaywrightTimeoutError:
-                        pass
-                    
-                    # If not logged in, look for login button
-                    login_button = self._page.query_selector('text=/log in|sign in/i')
-                    if login_button:
-                        logger.info("Clicking login button")
-                        login_button.click()
-                        self._page.wait_for_load_state("networkidle")
-                    
-                    # Wait for dashboard to confirm login
-                    self._page.wait_for_selector(
-                        'text=/dashboard|welcome|home/i',
-                        timeout=self.LOGIN_TIMEOUT
-                    )
-                    
-                    logger.info("Successfully logged in to CSC")
-                    self._logged_in = True
-                    return True
-                
-                except Exception as e:
-                    self._take_screenshot(self._page, "login_error")
-                    raise
-                
+            # Navigate to CSC
+            self._page.goto(self.CSC_URL, wait_until="networkidle", timeout=self.LOGIN_TIMEOUT)
+            
+            # Check if already logged in (SSO session active)
+            # Look for CSC dashboard elements
+            try:
+                self._page.wait_for_selector(
+                    'text=/dashboard|welcome|home/i',
+                    timeout=5000
+                )
+                logger.info("Already logged in via SSO")
+                self._logged_in = True
+                return True
+            except PlaywrightTimeoutError:
+                pass
+            
+            # If not logged in, look for login button
+            login_button = self._page.query_selector('text=/log in|sign in/i')
+            if login_button:
+                logger.info("Clicking login button")
+                login_button.click()
+                self._page.wait_for_load_state("networkidle")
+            
+            # Wait for dashboard to confirm login
+            self._page.wait_for_selector(
+                'text=/dashboard|welcome|home/i',
+                timeout=self.LOGIN_TIMEOUT
+            )
+            
+            logger.info("Successfully logged in to CSC")
+            self._logged_in = True
+            return True
+            
         except PlaywrightTimeoutError as e:
             logger.error(f"Timeout during CSC login: {e}")
+            self._take_screenshot(self._page, "login_error")
             raise AuthenticationError(f"CSC login timeout: {e}")
         except Exception as e:
             logger.error(f"CSC login failed: {e}")
+            self._take_screenshot(self._page, "login_error")
             raise AuthenticationError(f"CSC login failed: {e}")
     
     def onboard_worker(self, worker: WorkerInfo) -> str:
         """Onboard a single vendor worker via CSC UI.
         
         Args:
-            worker: Worker information
+            worker: Worker information (PII will be sanitized in logs)
+            
+        Returns:
+            Worker ID assigned by CSC
+            
+        Raises:
+            FormSubmissionError: If onboarding fails
+            CSCError: If not logged in
+        """
+        if not self._logged_in:
+            raise CSCError("Must login before onboarding workers. Call login() first.")
+        
+        # Sanitize PII for logging
+        sanitized_email = self._sanitize_email(worker.email)
+        logger.info(f"Onboarding worker: {worker.full_name} ({sanitized_email})")
             
         Returns:
             Worker ID assigned by CSC
