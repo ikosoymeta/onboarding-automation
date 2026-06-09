@@ -1,0 +1,30 @@
+# Vendor Onboarding Automation - Python Dependencies
+#
+# Install with: pip install -r requirements.txt
+# For Playwright browsers: playwright install chromium
+
+# Core dependencies
+python-dateutil>=2.8.0
+
+# Browser automation (CSC, AMP, Buy@)
+playwright>=1.40.0
+
+# Excel spreadsheet generation (CSC bulk upload)
+openpyxl>=3.1.0
+
+# HTTP client (TPA API, Butterfly API)
+requests>=2.31.0
+
+# Testing
+pytest>=7.4.0
+pytest-mock>=3.11.0
+pytest-cov>=4.1.0
+
+# Development tools (optional)
+black>=23.0.0          # Code formatting
+flake8>=6.0.0         # Linting
+mypy>=1.5.0           # Type checking
+
+# Documentation (optional)
+sphinx>=7.0.0
+sphinx-rtd-theme>=1.3.0
