@@ -8,6 +8,7 @@ from .automation import (
     WorkerInfo
 )
 from .spreadsheet import CSCSpreadsheetGenerator
+from .validator import CSCDataValidator
 
 __all__ = [
     "CSCAutomation",
@@ -15,5 +16,6 @@ __all__ = [
     "AuthenticationError",
     "FormSubmissionError",
     "WorkerInfo",
-    "CSCSpreadsheetGenerator"
+    "CSCSpreadsheetGenerator",
+    "CSCDataValidator"
 ]

@@ -84,3 +84,19 @@ class TestCSCAutomation(unittest.TestCase):
             result = self.automation.bulk_upload_workers(workers, tmp.name)
             self.assertIn("uploaded_count", result)
             self.assertIn("failed_count", result)
+
+
+class TestCSCModule(unittest.TestCase):
+    """Test CSC module exports."""
+    
+    def test_module_exports(self):
+        """Test that module exports correct public API."""
+        from src.csc import (
+            CSCAutomation, CSCError, AuthenticationError, FormSubmissionError,
+            WorkerInfo, CSCSpreadsheetGenerator, CSCDataValidator
+        )
+        
+        self.assertTrue(callable(CSCAutomation))
+        self.assertTrue(callable(WorkerInfo))
+        self.assertTrue(callable(CSCSpreadsheetGenerator))
+        self.assertTrue(callable(CSCDataValidator))
