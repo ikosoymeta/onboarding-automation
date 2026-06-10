@@ -85,48 +85,109 @@ class AgenticBuyingClient:
         Args:
             headless: Whether to run browser in headless mode
             screenshot_dir: Directory to save error screenshots.
-                          Defaults to ~/.vendor_onboarding/screenshots
+                          Defaults to ~/.vendor_onboarding/screenshots.
+                          Path is validated to prevent directory traversal.
         """
         self.headless = headless
         if screenshot_dir is None:
             screenshot_dir = Path.home() / ".vendor_onboarding" / "screenshots"
+        else:
+            # Validate screenshot_dir to prevent path traversal attacks
+            screenshot_path = Path(screenshot_dir).resolve()
+            # Ensure path is within user's home directory or /tmp
+            home = Path.home().resolve()
+            tmp = Path("/tmp").resolve()
+            try:
+                # Python 3.9+: Use is_relative_to for proper path validation
+                if not (screenshot_path.is_relative_to(home) or 
+                        screenshot_path.is_relative_to(tmp)):
+                    raise ValueError(
+                        f"screenshot_dir must be within home directory ({home}) "
+                        f"or /tmp, got: {screenshot_dir}"
+                    )
+            except AttributeError:
+                # Fallback for Python < 3.9: Use resolved path parts comparison
+                if not (str(screenshot_path).startswith(str(home) + "/") or 
+                        str(screenshot_path).startswith(str(tmp) + "/") or
+                        screenshot_path == home or screenshot_path == tmp):
+                    raise ValueError(
+                        f"screenshot_dir must be within home directory ({home}) "
+                        f"or /tmp, got: {screenshot_dir}"
+                    )
+            screenshot_dir = screenshot_path
+        
         self.screenshot_dir = Path(screenshot_dir)
         self.screenshot_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         self._playwright = None
         self._browser = None
         self._page = None
         self._assistant_open = False
+        import threading
+        self._lock = threading.Lock()  # For thread safety
     
     def start(self):
         """Start the browser session.
         
         Must be called before other operations. Browser stays alive
         until close() is called.
-        """
-        if self._browser is not None:
-            logger.warning("Browser already started")
-            return
         
-        logger.info("Starting browser session for Agentic Buying")
-        self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(headless=self.headless)
-        self._page = self._browser.new_page()
+        Thread-safe: Uses lock to prevent concurrent initialization.
+        """
+        with self._lock:
+            if self._browser is not None:
+                logger.warning("Browser already started")
+                return
+            
+            logger.info("Starting browser session for Agentic Buying")
+            playwright = None
+            browser = None
+            try:
+                playwright = sync_playwright().start()
+                browser = playwright.chromium.launch(headless=self.headless)
+                page = browser.new_page()
+                
+                # Only assign if all steps succeed
+                self._playwright = playwright
+                self._browser = browser
+                self._page = page
+            except Exception:
+                # Cleanup partially initialized resources
+                if browser:
+                    try:
+                        browser.close()
+                    except Exception:
+                        pass
+                if playwright:
+                    try:
+                        playwright.stop()
+                    except Exception:
+                        pass
+                raise
     
     def close(self):
-        """Close browser resources."""
-        if self._browser:
-            logger.info("Closing browser session")
-            self._browser.close()
-            self._browser = None
-            self._page = None
-            self._assistant_open = False
-        if self._playwright:
-            self._playwright.stop()
-            self._playwright = None
+        """Close browser resources.
+        
+        Thread-safe: Uses lock to prevent concurrent access during cleanup.
+        """
+        with self._lock:
+            if self._browser:
+                logger.info("Closing browser session")
+                self._browser.close()
+                self._browser = None
+                self._page = None
+                self._assistant_open = False
+            if self._playwright:
+                self._playwright.stop()
+                self._playwright = None
     
     def _take_screenshot(self, prefix: str = "agentic_error"):
         """Take screenshot for debugging."""
         try:
+            # Check if page is available before attempting screenshot
+            if self._page is None:
+                logger.debug("Cannot take screenshot: page not initialized")
+                return None
+            
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"buyat_{prefix}_{timestamp}.png"
             filepath = self.screenshot_dir / filename
@@ -136,6 +197,14 @@ class AgenticBuyingClient:
         except Exception as e:
             logger.error(f"Failed to take screenshot: {e}")
             return None
+    
+    def is_started(self) -> bool:
+        """Check if browser session is started.
+        
+        Returns:
+            True if browser is initialized and ready for use
+        """
+        return self._browser is not None and self._page is not None
     
     def navigate_to_suppliers(self):
         """Navigate to the Suppliers page where buy@ assistant is available."""
@@ -191,7 +260,8 @@ class AgenticBuyingClient:
         if not self._assistant_open:
             raise AgenticFlowError("Assistant not open. Call open_assistant() first.")
         
-        logger.info(f"Sending message to assistant: {message[:100]}...")
+        # Log without sensitive message content
+        logger.info("Sending message to buy@ assistant")
         
         try:
             # Find the chat input field (based on screenshot: "Ask buy@ assistant...")
@@ -377,8 +447,31 @@ class BuyAtClient:
         """
         self.headless = headless
         # Use secure default location with restricted permissions
+        # Validate screenshot_dir to prevent path traversal (consistent with AgenticBuyingClient)
         if screenshot_dir is None:
             screenshot_dir = Path.home() / ".vendor_onboarding" / "screenshots"
+        else:
+            screenshot_path = Path(screenshot_dir).resolve()
+            home = Path.home().resolve()
+            tmp = Path("/tmp").resolve()
+            try:
+                if not (screenshot_path.is_relative_to(home) or 
+                        screenshot_path.is_relative_to(tmp)):
+                    raise ValueError(
+                        f"screenshot_dir must be within home directory ({home}) "
+                        f"or /tmp, got: {screenshot_dir}"
+                    )
+            except AttributeError:
+                # Fallback for Python < 3.9
+                if not (str(screenshot_path).startswith(str(home) + "/") or 
+                        str(screenshot_path).startswith(str(tmp) + "/") or
+                        screenshot_path == home or screenshot_path == tmp):
+                    raise ValueError(
+                        f"screenshot_dir must be within home directory ({home}) "
+                        f"or /tmp, got: {screenshot_dir}"
+                    )
+            screenshot_dir = screenshot_path
+        
         self.screenshot_dir = Path(screenshot_dir)
         self.screenshot_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         self._browser = None
@@ -466,19 +559,14 @@ class BuyAtClient:
                 logger.warning(f"Agentic search failed, falling back to traditional: {e}")
         
         # Fall back to traditional browser automation
-        # TODO: Implement actual browser automation for traditional flow
-        # For now, simulate the search
-        # In production, this would use Playwright to:
-        # 1. Navigate to Buy@ URL
-        # 2. Search for supplier name
-        # 3. Parse results to determine if exists and status
-        
-        # Simulated logic for demonstration
-        # In real implementation, replace with actual browser automation
-        
-        # Simulate not found for demo purposes
-        # Real implementation would check actual Buy@ system
-        raise SupplierNotFoundError(f"Supplier '{supplier_name}' not found in Buy@")
+        # NOTE: Traditional flow not yet implemented. This is a placeholder
+        # that raises SupplierNotFoundError to maintain backward compatibility
+        # with existing tests and client code. In production, this would use
+        # Playwright to navigate to Buy@ URL, search for supplier, and parse results.
+        raise SupplierNotFoundError(
+            f"Supplier '{supplier_name}' not found in Buy@ (traditional search not implemented). "
+            f"Use BuyAtClient with use_agentic=True for supplier search."
+        )
     
     def _search_supplier_via_agentic(self, supplier_name: str) -> SupplierInfo:
         """Search for supplier using Agentic Buying Intake.
@@ -493,7 +581,7 @@ class BuyAtClient:
             raise BuyAtError("Agentic client not initialized")
         
         # Start browser if not already started
-        if not self._agentic_client._browser:
+        if not self._agentic_client.is_started():
             self._agentic_client.start()
             self._agentic_client.navigate_to_suppliers()
             self._agentic_client.open_assistant()
@@ -510,6 +598,12 @@ class BuyAtClient:
         is_active = False
         status = "unknown"
         
+        # Check for negation phrases FIRST (before positive matches)
+        # This prevents "not found" from matching "found"
+        if "not found" in message_lower or "does not exist" in message_lower:
+            raise SupplierNotFoundError(f"Supplier '{supplier_name}' not found in Buy@")
+        
+        # Now check for positive indicators
         if "exists" in message_lower or "found" in message_lower:
             exists = True
             if "active" in message_lower:
@@ -519,9 +613,6 @@ class BuyAtClient:
                 status = "inactive"
             elif "pending" in message_lower:
                 status = "pending"
-        
-        if not exists and ("not found" in message_lower or "does not exist" in message_lower):
-            raise SupplierNotFoundError(f"Supplier '{supplier_name}' not found in Buy@")
         
         info = SupplierInfo(
             name=supplier_name,
@@ -563,10 +654,10 @@ class BuyAtClient:
             BuyAtError: If invitation fails
             ValueError: If supplier_email is invalid (internal domain)
         """
-        # Validate email is external
+        # Validate email is external (check domain suffix, not substring)
         internal_domains = ["@facebook.com", "@meta.com", "@oculus.com", "@whatsapp.com", "@fb.com"]
         email_lower = supplier_email.lower()
-        if any(domain in email_lower for domain in internal_domains):
+        if any(email_lower.endswith(domain) for domain in internal_domains):
             raise ValueError(
                 f"Supplier email must be external (not {', '.join(internal_domains)}). "
                 f"Got: {supplier_email}"
@@ -582,7 +673,7 @@ class BuyAtClient:
         
         try:
             # Start browser if not already started
-            if not self._agentic_client._browser:
+            if not self._agentic_client.is_started():
                 self._agentic_client.start()
                 self._agentic_client.navigate_to_suppliers()
                 self._agentic_client.open_assistant()

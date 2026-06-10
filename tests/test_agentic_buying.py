@@ -149,6 +149,7 @@ class TestBuyAtClientAgentic(unittest.TestCase):
         
         # Mock the agentic client as already started
         self.client._agentic_client._browser = MagicMock()
+        self.client._agentic_client._page = MagicMock()
         
         result = self.client.invite_supplier(
             supplier_name="Acme Corp",
@@ -186,6 +187,7 @@ class TestBuyAtClientAgentic(unittest.TestCase):
         
         # Mock the agentic client as already started
         self.client._agentic_client._browser = MagicMock()
+        self.client._agentic_client._page = MagicMock()
         
         result = self.client._search_supplier_via_agentic("Acme Corp")
         
@@ -204,6 +206,7 @@ class TestBuyAtClientAgentic(unittest.TestCase):
         )
         
         self.client._agentic_client._browser = MagicMock()
+        self.client._agentic_client._page = MagicMock()
         
         with self.assertRaises(SupplierNotFoundError):
             self.client._search_supplier_via_agentic("XYZ Corp")

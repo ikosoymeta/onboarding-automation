@@ -174,7 +174,9 @@ class VendorOnboardingSystem:
                     logger.info(f"Supplier {supplier_name} needs onboarding")
                     
                     # Use Buy@ Assistant for onboarding if enabled
-                    if self.use_buyat_assistant:
+                    # Use local variable to avoid mutating instance state
+                    use_assistant = self.use_buyat_assistant
+                    if use_assistant:
                         logger.info("Using Buy@ Assistant (Metamate) for supplier onboarding")
                         try:
                             # Extract supplier email and purpose from supplier_data
@@ -205,12 +207,12 @@ class VendorOnboardingSystem:
                         except Exception as e:
                             logger.error(f"Buy@ Assistant onboarding failed: {e}")
                             result.errors.append(f"Buy@ Assistant onboarding failed: {e}")
-                            # Fall back to traditional Butterfly form
+                            # Fall back to traditional Butterfly form for this operation only
                             logger.info("Falling back to traditional Butterfly form")
-                            self.use_buyat_assistant = False
+                            use_assistant = False
                     
                     # Traditional Butterfly form (if not using Buy@ Assistant or if it failed)
-                    if not self.use_buyat_assistant:
+                    if not use_assistant:
                         logger.info("Using traditional Butterfly form for supplier onboarding")
                         try:
                             response = self.butterfly.submit_supplier_onboarding(

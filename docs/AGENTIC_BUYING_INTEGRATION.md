@@ -65,10 +65,10 @@ The **AutoPR AI Agent** (part of `MetamateEngineBuyAtPurchasingAgent`) is a key 
 2. Via Agent Workspace: Case → Action dropdown → "Create purchase request using Buy@ Assistant"
 
 **Key Limitations:**
-- ❌ Cannot create new suppliers, cost centers, purchasing categories, or FBPNs (must exist first)
-- ❌ Cannot modify PRs after submission
-- ⚠️ Limited support for multi-turn PR updates after draft creation
-- ❌ No compliance/risk assessment (standard buy@ validations still apply)
+- [IMPORTANT] Cannot create new suppliers, cost centers, purchasing categories, or FBPNs (must exist first)
+- [IMPORTANT] Cannot modify PRs after submission
+- [WARNING] Limited support for multi-turn PR updates after draft creation
+- [IMPORTANT] No compliance/risk assessment (standard buy@ validations still apply)
 
 ### MCP Tools (47+ Tools)
 
