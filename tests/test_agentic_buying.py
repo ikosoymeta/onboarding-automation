@@ -6,7 +6,8 @@ from src.buyat.client import (
     BuyAtClient, 
     SupplierInfo, 
     SupplierNotFoundError,
-    AgenticFlowError
+    AgenticFlowError,
+    BuyAtError
 )
 
 
@@ -63,10 +64,13 @@ class TestAgenticBuyingClient(unittest.TestCase):
         
         # Configure locator to return different mocks for different calls
         # First call (input field) returns mock_input, second call (button) returns mock_button
-        mock_page.locator.side_effect = [
-            MagicMock(first=MagicMock(return_value=mock_input)),
-            MagicMock(first=MagicMock(return_value=mock_button))
-        ]
+        # locator() returns an object with .first property
+        mock_input_locator = MagicMock()
+        mock_input_locator.first = mock_input
+        mock_button_locator = MagicMock()
+        mock_button_locator.first = mock_button
+        mock_page.locator.side_effect = [mock_input_locator, mock_button_locator]
+        
         mock_input.is_visible.return_value = True
         mock_button.is_visible.return_value = True
         
