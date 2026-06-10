@@ -79,17 +79,28 @@ class VendorOnboardingSystem:
     - Complete audit trail
     """
     
-    def __init__(self):
-        """Initialize the vendor onboarding system."""
+    def __init__(self, use_buyat_assistant: bool = True):
+        """Initialize the vendor onboarding system.
+        
+        Args:
+            use_buyat_assistant: If True, uses Buy@ Assistant (Metamate agents)
+                for supplier onboarding via conversational AI. If False, uses
+                traditional Butterfly forms and custom browser automation.
+                Default: True (recommended - uses official Buy@ Assistant)
+        """
         self.butterfly = ButterflyClient()
         self.csc = CSCAutomation()
         self.amp = AMPAutomation()
         self.tpa = TPAClient()
-        self.buyat = BuyAtClient()
+        self.buyat = BuyAtClient(use_agentic=use_buyat_assistant)
         self.csc_validator = CSCDataValidator()
         self.spreadsheet_gen = CSCSpreadsheetGenerator()
+        self.use_buyat_assistant = use_buyat_assistant
         
-        logger.info("Vendor Onboarding System initialized")
+        logger.info(
+            f"Vendor Onboarding System initialized "
+            f"(use_buyat_assistant={use_buyat_assistant})"
+        )
     
     def onboard_vendor(
         self,
@@ -146,7 +157,7 @@ class VendorOnboardingSystem:
         )
         
         try:
-            # Step 1: Verify supplier in Buy@
+            # Step 1: Verify supplier in Buy@ and onboard if needed
             logger.info("Step 1: Verifying supplier in Buy@")
             try:
                 supplier_info = self.buyat.search_supplier(supplier_name)
@@ -158,28 +169,66 @@ class VendorOnboardingSystem:
                 )
                 
                 if result.supplier_already_active:
-                    logger.info(f"Supplier {supplier_name} already active, skipping onboarding form")
+                    logger.info(f"Supplier {supplier_name} already active, skipping onboarding")
                 else:
                     logger.info(f"Supplier {supplier_name} needs onboarding")
+                    
+                    # Use Buy@ Assistant for onboarding if enabled
+                    if self.use_buyat_assistant:
+                        logger.info("Using Buy@ Assistant (Metamate) for supplier onboarding")
+                        try:
+                            # Extract supplier email and purpose from supplier_data
+                            supplier_email = supplier_data.get("supplier_email") or supplier_data.get("contact_email")
+                            purpose = supplier_data.get("business_purpose") or supplier_data.get("justification", "Vendor services")
+                            subscribers = supplier_data.get("subscribers", [])
+                            
+                            if not supplier_email:
+                                raise ValueError("supplier_email is required for Buy@ Assistant onboarding")
+                            
+                            # Use Buy@ Assistant to onboard supplier
+                            # This routes to BUY_SUPPLIER_AGENT via the conversational UI
+                            onboarding_result = self.buyat.invite_supplier(
+                                supplier_name=supplier_name,
+                                supplier_email=supplier_email,
+                                purpose=purpose,
+                                subscribers=subscribers
+                            )
+                            
+                            result.supplier_id = onboarding_result.supplier_id
+                            logger.info(
+                                f"Supplier onboarding initiated via Buy@ Assistant. "
+                                f"Supplier has 10 business days to complete enrollment."
+                            )
+                            # Note: We don't wait for completion here - the workflow continues
+                            # with other steps while supplier completes onboarding in parallel
+                            
+                        except Exception as e:
+                            logger.error(f"Buy@ Assistant onboarding failed: {e}")
+                            result.errors.append(f"Buy@ Assistant onboarding failed: {e}")
+                            # Fall back to traditional Butterfly form
+                            logger.info("Falling back to traditional Butterfly form")
+                            self.use_buyat_assistant = False
+                    
+                    # Traditional Butterfly form (if not using Buy@ Assistant or if it failed)
+                    if not self.use_buyat_assistant:
+                        logger.info("Using traditional Butterfly form for supplier onboarding")
+                        try:
+                            response = self.butterfly.submit_supplier_onboarding(
+                                data=supplier_data,
+                                validate=True
+                            )
+                            result.butterfly_forms["supplier_onboarding"] = response.response_id
+                            logger.info(f"Supplier onboarding form submitted: {response.response_id}")
+                        except Exception as e:
+                            logger.error(f"Failed to submit supplier onboarding: {e}")
+                            result.errors.append(f"Supplier onboarding failed: {e}")
+                            
             except Exception as e:
                 logger.warning(f"Could not verify supplier: {e}")
                 result.errors.append(f"Supplier verification warning: {e}")
             
             # Step 2: Submit Butterfly forms (in parallel where possible)
             logger.info("Step 2: Submitting Butterfly forms")
-            
-            # Supplier Onboarding Form (if not already active)
-            if not result.supplier_already_active:
-                try:
-                    response = self.butterfly.submit_supplier_onboarding(
-                        data=supplier_data,
-                        validate=True
-                    )
-                    result.butterfly_forms["supplier_onboarding"] = response.response_id
-                    logger.info(f"Supplier onboarding form submitted: {response.response_id}")
-                except Exception as e:
-                    logger.error(f"Failed to submit supplier onboarding: {e}")
-                    result.errors.append(f"Supplier onboarding failed: {e}")
             
             # YubiKey Request (if enabled and workers need them)
             if enable_yubikey and workers:
