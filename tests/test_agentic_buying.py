@@ -60,7 +60,13 @@ class TestAgenticBuyingClient(unittest.TestCase):
         mock_page = MagicMock()
         mock_input = MagicMock()
         mock_button = MagicMock()
-        mock_page.locator.return_value.first = mock_input
+        
+        # Configure locator to return different mocks for different calls
+        # First call (input field) returns mock_input, second call (button) returns mock_button
+        mock_page.locator.side_effect = [
+            MagicMock(first=MagicMock(return_value=mock_input)),
+            MagicMock(first=MagicMock(return_value=mock_button))
+        ]
         mock_input.is_visible.return_value = True
         mock_button.is_visible.return_value = True
         
