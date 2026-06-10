@@ -4,7 +4,89 @@
 
 On June 10, 2026, Meta launched **Agentic Buying Intake** — a conversational AI experience that replaces the traditional multi-step form for New Goods & Services requests in buy@. This document describes how the Vendor Onboarding Automation integrates with the new agentic flow.
 
-## What Changed
+The Buy@ Assistant is built on Meta's Metamate platform using a sophisticated multi-agent architecture with 11+ specialized agents and 47+ MCP tools. Understanding this architecture is essential for effective integration.
+
+## Buy@ Assistant Architecture
+
+### Multi-Agent System Overview
+
+The Buy@ Assistant uses an **orchestrator + specialist agent pattern** built on the Metamate platform:
+
+**Top-Level Agents:**
+1. **`MetamateEngineBuyAtAssistant`** (`BUY_ASSISTANT`) - Main entry point and user-facing assistant. Routes requests to specialized sub-agents via handoff tools. Does NOT answer questions directly.
+2. **`MetamateEngineBuyAtOrchestrationAgent`** (`BUY_ORCHESTRATION_AGENT`) - Alternative orchestrator that delegates to purchasing, sourcing, and supplier sub-agents. Uses Claude Opus 4.6 with max reasoning effort.
+
+### Specialist Agents (11 Total)
+
+| Agent | Agent Name | Role |
+|-------|------------|------|
+| `MetamateEngineBuyAtPurchasingAgent` | `BUY_PURCHASING_AGENT` | AutoPR - generates draft Purchase Requests from cases, tasks, documents, URLs |
+| `MetamateEngineBuyAtAutoPRCriticAgent` | - | Self-critique loop for PR quality |
+| `MetamateEngineBuyAtSourcingAgent` | `BUY_SOURCING_AGENT` | Sourcing/procurement guidance, RFx management |
+| `MetamateEngineBuyAtSupplierAgent` | `BUY_SUPPLIER_AGENT` | **Supplier lookup and management** (key for onboarding) |
+| `MetamateEngineBuyAtAnalyticAgent` | `BUY_ANALYTIC_AGENT` | Data/reporting queries, dashboard composition |
+| `MetamateEngineBuyAtAnalyticResearchAgent` | `BUY_ANALYTIC_RESEARCH_AGENT` | Deep analytical research, Python execution |
+| `MetamateEngineBuyAtKnowledgeGraphAgent` | `BUY_KNOWLEDGE_GRAPH_AGENT` | Policy/knowledge lookups, entity search |
+| `MetamateEngineBuyAtWorkflowAgent` | `BUY_WORKFLOW_AGENT` | Dynamic workflow orchestration |
+| `MetamateEngineBuyAtGoodsOrServicesAgent` | - | Goods vs services classification |
+| `MetamateEngineBuyAtSupportAssistant` | `BUY_HELPDESK_AGENT` | General buy@ support, PO actions, case management |
+| `MetamateSmartinvoicingAssistantAgent` | `SMARTINVOICING_ASSISTANT` | Invoice handling |
+
+### Key Agent for Supplier Onboarding: `BUY_SUPPLIER_AGENT`
+
+The **`MetamateEngineBuyAtSupplierAgent`** (`BUY_SUPPLIER_AGENT`) is the primary integration point for supplier onboarding automation:
+
+**Location:** `www/flib/intern/metamate/engine/domain_agents/agents/buy/supplier/MetamateEngineBuyAtSupplierAgent.php`
+
+**LLM:** Claude Opus 4.6 (max reasoning effort)
+
+**Tools:**
+- `MetamateAgentBuyAtSupplierSearchTool` - Search for existing suppliers
+- `MetamateAgentBuyAtSupplierOnboardingTool` - **Initiate supplier onboarding workflow**
+- `MetamateAgentBuyAtSupplierOnboardingDashboardCaseSearchTool` - Track onboarding status via dashboard cases
+- `MetamateAgentBuyAtSupplierRelationshipOwnerSearchTool` - Find supplier relationship owners
+- `MetamateAgentKnowledgeLoadToolV3` - Load knowledge from URLs
+
+**Sub-agents:**
+- `MetamateAgentBuyAtKnowledgeGraphAgentTool` → KnowledgeGraph agent for policy/entity lookups
+
+### AutoPR AI Agent
+
+The **AutoPR AI Agent** (part of `MetamateEngineBuyAtPurchasingAgent`) is a key component:
+
+**What it does:**
+- Creates draft Purchase Requests from Agent Workspace cases, tasks, attachments, internal URLs (including Google Docs), and buy@ data
+- Uses AI-driven extraction to pre-populate PR fields
+- Provides field-level reasoning and citations for explainability
+- Becomes the **default PR drafting experience starting March 2026**
+
+**How to access:**
+1. Via buy@ Assistant panel: "Create a purchase request draft from [case number]"
+2. Via Agent Workspace: Case → Action dropdown → "Create purchase request using Buy@ Assistant"
+
+**Key Limitations:**
+- ❌ Cannot create new suppliers, cost centers, purchasing categories, or FBPNs (must exist first)
+- ❌ Cannot modify PRs after submission
+- ⚠️ Limited support for multi-turn PR updates after draft creation
+- ❌ No compliance/risk assessment (standard buy@ validations still apply)
+
+### MCP Tools (47+ Tools)
+
+The agents have access to 47+ tools registered via `MetamateAgentBuyAtToolFactory`:
+
+**Purchase Request & PO Tools:**
+- `BUY_PR_SEARCH` / `BUY_PR_NAVIGATOR` — Find and navigate PRs
+- `BUY_PO_SEARCH` — Purchase order lookup
+- `BUY_PR_LINE_SEARCH` — Line-item search
+- `BUY_DOCUMENT_EXTRACTION` — Extract data from attachments
+
+**Supplier Tools:**
+- `MetamateAgentBuyAtSupplierSearchTool` — Search suppliers by name, ID, etc.
+- `MetamateAgentBuyAtSupplierOnboardingTool` — Initiate onboarding workflow
+- `MetamateAgentBuyAtSupplierOnboardingDashboardCaseSearchTool` — Find onboarding cases
+- `MetamateAgentBuyAtSupplierRelationshipOwnerSearchTool` — Find supplier owners
+
+## What Changed (User Perspective)
 
 ### Before (Traditional Form)
 - Navigate to buy@ → Suppliers tab
@@ -46,10 +128,18 @@ Information provided during the conversation carries forward into downstream for
 
 ## Integration in Vendor Onboarding Automation
 
+### Architecture: Browser Automation for Metamate Agents
+
+The Vendor Onboarding Automation uses **browser automation** (Playwright) to interact with the Buy@ Assistant's conversational UI. This approach is necessary because:
+
+1. **No Public API**: The Buy@ Assistant (Metamate agents) does not expose a public API for programmatic access
+2. **UI-Based Interaction**: The assistant is designed for human interaction via the web interface
+3. **Agent Orchestration**: The multi-agent system (router → specialist agents) is orchestrated internally by Metamate; we interact with the top-level `BUY_ASSISTANT` via its UI
+
 ### New Components
 
 #### AgenticBuyingClient
-A new class (`src/buyat/client.py`) that automates the conversational UI:
+A new class (`src/buyat/client.py`) that automates the conversational UI via browser automation:
 
 ```python
 from src.buyat import AgenticBuyingClient
@@ -60,6 +150,7 @@ client.navigate_to_suppliers()
 client.open_assistant()
 
 # Onboard a supplier via conversation
+# This sends a message to the BUY_ASSISTANT, which routes to BUY_SUPPLIER_AGENT
 response = client.onboard_supplier(
     supplier_name="Acme Corp",
     supplier_email="contact@acme.com",
@@ -69,13 +160,23 @@ response = client.onboard_supplier(
 ```
 
 **Key Methods:**
-- `start()`: Initialize browser session
-- `navigate_to_suppliers()`: Go to Suppliers page
-- `open_assistant()`: Open the buy@ assistant side panel
+- `start()`: Initialize browser session (Playwright)
+- `navigate_to_suppliers()`: Go to Suppliers page (spend.internalmeta.com/suppliers)
+- `open_assistant()`: Open the buy@ assistant side panel (triggers `BUY_ASSISTANT`)
 - `send_message(message)`: Send natural language message to assistant
-- `onboard_supplier(...)`: High-level workflow for supplier onboarding
+- `onboard_supplier(...)`: High-level workflow for supplier onboarding (routes to `BUY_SUPPLIER_AGENT`)
 - `check_supplier_status(name)`: Check if supplier exists via conversation
 - `close()`: Clean up browser resources
+
+**How it works:**
+1. Browser navigates to buy@ Suppliers page
+2. Clicks "buy@ assistant" button to open chat panel
+3. Sends natural language message via the chat input
+4. The `BUY_ASSISTANT` (MetamateEngineBuyAtAssistant) receives the message
+5. Assistant routes to appropriate specialist agent (e.g., `BUY_SUPPLIER_AGENT` for supplier tasks)
+6. Specialist agent uses its tools (e.g., `MetamateAgentBuyAtSupplierOnboardingTool`) to execute the request
+7. Response is displayed in the chat panel
+8. Automation parses the response and returns it
 
 #### Enhanced BuyAtClient
 The existing `BuyAtClient` now supports agentic flow:
@@ -87,6 +188,7 @@ from src.buyat import BuyAtClient
 client = BuyAtClient(use_agentic=True)
 
 # Invite a new supplier via agentic conversation
+# This uses the BUY_SUPPLIER_AGENT via the assistant UI
 supplier = client.invite_supplier(
     supplier_name="Acme Corp",
     supplier_email="contact@acme.com",
@@ -95,6 +197,7 @@ supplier = client.invite_supplier(
 )
 
 # Search for supplier (uses agentic flow if enabled)
+# Routes to BUY_SUPPLIER_AGENT via MetamateAgentBuyAtSupplierSearchTool
 info = client.search_supplier("Acme Corp")
 ```
 
@@ -102,9 +205,30 @@ info = client.search_supplier("Acme Corp")
 - `use_agentic` (bool, default=True): Enable Agentic Buying Intake flow
 
 **New Methods:**
-- `invite_supplier(...)`: Invite new supplier via conversational AI
+- `invite_supplier(...)`: Invite new supplier via conversational AI (uses `BUY_SUPPLIER_AGENT`)
 - `start_agentic_session()`: Initialize agentic flow session
-- `_search_supplier_via_agentic()`: Internal method for agentic search
+- `_search_supplier_via_agentic()`: Internal method for agentic search (uses supplier search tool)
+
+### Integration with Metamate Agents
+
+When the automation sends a message like:
+```
+"I need to onboard a new supplier: Acme Corp. 
+Their email is contact@acme.com. 
+Purpose: IT consulting services."
+```
+
+The following happens internally in the Buy@ Assistant:
+
+1. **`BUY_ASSISTANT`** (MetamateEngineBuyAtAssistant) receives the message
+2. Router analyzes intent and determines this is a supplier onboarding request
+3. **Handoff** to `BUY_SUPPLIER_AGENT` (MetamateEngineBuyAtSupplierAgent) via `MetamateExperimentalHandoffTool`
+4. **`BUY_SUPPLIER_AGENT`** processes the request using:
+   - `MetamateAgentBuyAtSupplierSearchTool` - Check if supplier already exists
+   - `MetamateAgentBuyAtSupplierOnboardingTool` - Initiate onboarding workflow
+   - `MetamateAgentKnowledgeLoadToolV3` - Load any relevant documentation
+5. **Response** is generated and displayed in the chat panel
+6. **Automation** parses the response and returns structured data
 
 ### Usage Examples
 

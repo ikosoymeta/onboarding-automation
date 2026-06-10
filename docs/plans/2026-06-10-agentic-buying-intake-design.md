@@ -6,6 +6,92 @@ On June 10, 2026, Meta launched Agentic Buying Intake — a conversational AI ex
 
 The Agentic Buying Intake uses a chat-based interface where users describe their requests in natural language and attach supporting documents. The AI agent handles the intake process, carrying context forward into downstream forms without requiring re-entry of information. Critically, the downstream operational workflow (supplier onboarding, approvals, TPA, etc.) remains unchanged.
 
+## Buy@ Assistant Architecture
+
+The Buy@ Assistant is built on Meta's Metamate platform using a multi-agent orchestration pattern. Understanding this architecture is crucial for effective integration.
+
+### Core Architecture: Orchestrator + Specialist Agents
+
+The system uses a hierarchical multi-agent architecture:
+
+**Top-Level Router:**
+- **`MetamateEngineBuyAtAssistant`** (`BUY_ASSISTANT`) - Main entry point and user-facing assistant. Routes requests to specialized sub-agents via handoff tools. Does not answer questions directly.
+
+**Alternative Orchestrator:**
+- **`MetamateEngineBuyAtOrchestrationAgent`** (`BUY_ORCHESTRATION_AGENT`) - Routes to purchasing, sourcing, and supplier sub-agents. Uses Claude Opus 4.6 with max reasoning effort.
+
+### Specialist Agents
+
+| Agent | Role | Key Capabilities |
+|-------|------|------------------|
+| `MetamateEngineBuyAtPurchasingAgent` | AutoPR - Purchase Request generation | Creates draft PRs from cases, tasks, documents, URLs |
+| `MetamateEngineBuyAtAutoPRCriticAgent` | Self-critique loop | Reviews PR quality, provides feedback |
+| `MetamateEngineBuyAtSourcingAgent` | Sourcing/procurement guidance | Creates/updates sourcing events, manages RFx |
+| `MetamateEngineBuyAtSupplierAgent` | Supplier lookup and management | Searches suppliers, manages onboarding, finds relationship owners |
+| `MetamateEngineBuyAtAnalyticAgent` | Data/reporting queries | Dashboard composition, SQL queries, data retrieval |
+| `MetamateEngineBuyAtAnalyticResearchAgent` | Deep analytical research | Complex data analysis, Python code execution |
+| `MetamateEngineBuyAtKnowledgeGraphAgent` | Policy/knowledge lookups | Searches policies, entities, PRs, POs, suppliers |
+| `MetamateEngineBuyAtWorkflowAgent` | Workflow orchestration | Dynamically loads tools based on workflow |
+| `MetamateEngineBuyAtGoodsOrServicesAgent` | Classification | Determines if request is for goods or services |
+| `MetamateEngineBuyAtSupportAssistant` | General buy@ support | Helpdesk, PO actions, case management |
+| `MetamateSmartinvoicingAssistantAgent` | Invoice handling | Invoice search, DTP assistance |
+
+### MCP Tools (47+ Tools)
+
+The agents have access to 47+ tools registered via `MetamateAgentBuyAtToolFactory`, organized into categories:
+
+**Purchase Request & PO Tools:**
+- `BUY_PR_SEARCH` / `BUY_PR_NAVIGATOR` — Find and navigate PRs
+- `BUY_PO_SEARCH` — Purchase order lookup
+- `BUY_PR_LINE_SEARCH` — Line-item search
+- `BUY_DOCUMENT_EXTRACTION` — Extract data from attachments
+
+**Supplier Tools:**
+- `MetamateAgentBuyAtSupplierSearchTool` — Search suppliers
+- `MetamateAgentBuyAtSupplierOnboardingTool` — Initiate onboarding
+- `MetamateAgentBuyAtSupplierOnboardingDashboardCaseSearchTool` — Find onboarding cases
+- `MetamateAgentBuyAtSupplierRelationshipOwnerSearchTool` — Find supplier owners
+
+**AutoPR Tools:**
+- `MetamateAgentBuyAtPurchaseRequestDraftCreateTool` — Create PR drafts
+- `MetamateAgentBuyAtPurchaseRequestUpdateTool` — Update PRs
+- `MetamateAgentTaskDetailsTool` — Get task details
+- `MetamateAgentProcurementCaseDetailsTool` — Get case details
+
+### Helper Traits
+
+Shared functionality across agents:
+- `MetamateEngineBuyAtLLMPipelineTrait` — Shared LLM pipeline utilities
+- `MetamateEngineBuyAtSuggestFollowupPromptTrait` — Follow-up suggestions
+- `MetamateEngineBuyAtThreadContextTrait` — Conversation context management
+- `MetamateEngineBuyAtAssistantPOandPRCheckTrait` — PO/PR validation
+
+### Integration Points for Vendor Onboarding
+
+The `MetamateEngineBuyAtSupplierAgent` (`BUY_SUPPLIER_AGENT`) is the key integration point for supplier onboarding automation. It provides:
+
+1. **Supplier Search**: `MetamateAgentBuyAtSupplierSearchTool` - Search for existing suppliers
+2. **Supplier Onboarding**: `MetamateAgentBuyAtSupplierOnboardingTool` - Initiate onboarding workflow
+3. **Onboarding Case Search**: `MetamateAgentBuyAtSupplierOnboardingDashboardCaseSearchTool` - Track onboarding status
+4. **Relationship Owner Search**: `MetamateAgentBuyAtSupplierRelationshipOwnerSearchTool` - Find supplier contacts
+
+The agent uses Claude Opus 4.6 with max reasoning effort, indicating complex reasoning capabilities for supplier management tasks.
+
+### AutoPR AI Agent
+
+The **AutoPR AI Agent** (part of `MetamateEngineBuyAtPurchasingAgent`) is particularly relevant:
+- Creates draft Purchase Requests from Agent Workspace cases, tasks, attachments, and URLs
+- Extracts details using AI-driven extraction
+- Provides field-level reasoning and citations for explainability
+- Becomes the default PR drafting experience starting March 2026
+- Accessible via buy@ Assistant panel or directly from Agent Workspace cases
+
+**Key Limitations:**
+- Cannot create new suppliers, cost centers, purchasing categories, or FBPNs (must exist first)
+- Cannot update PRs after submission
+- Limited support for multi-turn PR updates after draft creation
+- No compliance/risk assessment (standard buy@ validations still apply)
+
 ## Current State
 
 The existing `BuyAtClient` (`src/buyat/client.py`) provides:
