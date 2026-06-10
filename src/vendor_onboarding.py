@@ -235,17 +235,19 @@ class VendorOnboardingSystem:
             # YubiKey Request (if enabled and workers need them)
             if enable_yubikey and workers:
                 try:
+                    # Get shipping address from supplier_data, with fallback to placeholder
+                    shipping_addr = supplier_data.get("shipping_address", {})
                     yubikey_data = {
                         "vendor_workers": [
                             {
                                 "full_name": w.full_name,
                                 "email": w.email,
                                 "shipping_address": {
-                                    "street": "123 Vendor St",  # Would come from supplier_data
-                                    "city": "San Francisco",
-                                    "state": "CA",
-                                    "zip": "94105",
-                                    "country": "USA"
+                                    "street": shipping_addr.get("street", "123 Vendor St"),
+                                    "city": shipping_addr.get("city", "San Francisco"),
+                                    "state": shipping_addr.get("state", "CA"),
+                                    "zip": shipping_addr.get("zip", "94105"),
+                                    "country": shipping_addr.get("country", "USA")
                                 }
                             }
                             for w in workers

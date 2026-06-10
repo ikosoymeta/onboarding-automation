@@ -307,16 +307,16 @@ class AgenticBuyingClient:
         try:
             # Wait for response to appear (look for message bubbles)
             # The assistant's responses appear in the chat panel
+            # Use consistent selector for both wait and retrieval
+            message_selector = '[data-testid="assistant-message"], .assistant-message, [class*="assistant"]'
             self._page.wait_for_selector(
-                '[data-testid="assistant-message"], .assistant-message, [class*="assistant"]',
+                message_selector,
                 timeout=self.AGENT_RESPONSE_TIMEOUT
             )
             
             # Get the latest assistant message
             # This selector may need adjustment based on actual DOM structure
-            messages = self._page.locator(
-                '[data-testid="assistant-message"], .assistant-message'
-            ).all()
+            messages = self._page.locator(message_selector).all()
             
             if messages:
                 latest_message = messages[-1].inner_text()
@@ -474,6 +474,9 @@ class BuyAtClient:
         
         self.screenshot_dir = Path(screenshot_dir)
         self.screenshot_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        # Note: _browser and _page are not used in BuyAtClient - all browser
+        # operations are delegated to _agentic_client. These attributes are
+        # kept for backward compatibility but are not actively used.
         self._browser = None
         self._page = None
         self._cache: Dict[str, tuple[SupplierInfo, datetime]] = {}
@@ -642,7 +645,7 @@ class BuyAtClient:
         Args:
             supplier_name: Name of the supplier to invite
             supplier_email: Contact email for the supplier (must be external,
-                          not @facebook, @meta, @oculus, @whatsapp)
+                          not @facebook.com, @meta.com, @oculus.com, @whatsapp.com, @fb.com)
             purpose: Business purpose for onboarding this supplier
             subscribers: Optional list of internal employee emails to receive
                         status notifications
