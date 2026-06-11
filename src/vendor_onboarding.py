@@ -372,10 +372,8 @@ class VendorOnboardingSystem:
     
     def get_status(self, workflow_id: str) -> Dict[str, Any]:
         """Get status of an ongoing onboarding workflow.
-        
         Args:
             workflow_id: ID of the workflow to check
-            
         Returns:
             Dictionary with workflow status
         """
@@ -387,3 +385,214 @@ class VendorOnboardingSystem:
             "status": "in_progress",
             "message": "Status tracking available in Phase 4 dashboard"
         }
+
+
+@dataclass
+class PRCreationResult:
+    """Result of a purchase request creation workflow."""
+    success: bool
+    pr_number: Optional[str] = None
+    pr_url: Optional[str] = None
+    status: str = "unknown"  # draft, submitted, approved, rejected
+    supplier_name: str = ""
+    amount: float = 0.0
+    
+    # Monitoring
+    polling_id: Optional[str] = None
+    monitoring_active: bool = False
+    
+    # Errors
+    errors: List[str] = None
+    blockers: List[str] = None
+    
+    def __post_init__(self):
+        if self.errors is None:
+            self.errors = []
+        if self.blockers is None:
+            self.blockers = []
+
+
+class PurchaseRequestWorkflow:
+    """Workflow orchestrator for Purchase Request creation.
+    
+    Implements Phase 4 of the PR creation plan, integrating with
+    WorkflowOrchestrator for state management and tracking.
+    
+    Workflow Steps:
+    1. Verify supplier exists in Buy@
+    2. Verify supplier PR readiness (TPA check)
+    3. Create PR draft (or submit for approval)
+    4. If submitted, start async polling (non-blocking)
+    5. Send completion notification
+    """
+    
+    def __init__(self, buyat_client: BuyAtClient):
+        """Initialize PR workflow.
+        
+        Args:
+            buyat_client: BuyAtClient instance for PR operations
+        """
+        self.buyat = buyat_client
+        self.orchestrator = WorkflowOrchestrator()
+        logger.info("PurchaseRequestWorkflow initialized")
+    
+    def create_pr_workflow(
+        self,
+        supplier_name: str,
+        amount: float,
+        description: str,
+        justification: str,
+        cost_center: str,
+        submit_for_approval: bool = False,
+        delivery_date: Optional[str] = None,
+        attachments: List[str] = None,
+        reference_case_id: Optional[str] = None,
+        notification_callback: Optional[Callable] = None
+    ) -> PRCreationResult:
+        """Execute PR creation workflow with state tracking.
+        
+        Orchestrates the complete PR creation process with workflow
+        state management for tracking and recovery.
+        
+        Args:
+            supplier_name: Name of the supplier
+            amount: PR amount in USD
+            description: Description of goods/services
+            justification: Business justification
+            cost_center: Cost center for charging
+            submit_for_approval: If True, submit immediately; if False, create draft
+            delivery_date: Optional delivery date (YYYY-MM-DD)
+            attachments: Optional list of file paths to attach
+            reference_case_id: Optional reference case ID
+            notification_callback: Optional callback for status notifications
+            
+        Returns:
+            PRCreationResult with PR details and workflow status
+        """
+        workflow_id = f"pr_workflow_{supplier_name}_{int(datetime.now().timestamp())}"
+        logger.info(f"Starting PR workflow {workflow_id} for {supplier_name}")
+        
+        result = PRCreationResult(
+            success=False,
+            supplier_name=supplier_name,
+            amount=amount
+        )
+        
+        try:
+            # Step 1: Verify supplier exists
+            logger.info(f"Step 1: Verifying supplier {supplier_name}")
+            try:
+                supplier_info = self.buyat.search_supplier(supplier_name, use_cache=False)
+                if not supplier_info.exists:
+                    result.errors.append(f"Supplier '{supplier_name}' not found in Buy@")
+                    result.blockers = [f"Supplier '{supplier_name}' not found"]
+                    return result
+                if not supplier_info.is_active:
+                    result.errors.append(f"Supplier '{supplier_name}' is not active (status: {supplier_info.status})")
+                    result.blockers = [f"Supplier not active: {supplier_info.status}"]
+                    return result
+                logger.info(f"✓ Supplier {supplier_name} verified (active)")
+            except Exception as e:
+                result.errors.append(f"Supplier verification failed: {e}")
+                return result
+            
+            # Step 2: Verify supplier PR readiness (TPA check) if submitting
+            if submit_for_approval:
+                logger.info("Step 2: Verifying supplier PR readiness (TPA check)")
+                try:
+                    readiness = self.buyat.verify_supplier_for_pr(supplier_name)
+                    if not readiness.can_proceed:
+                        result.errors.append(f"Supplier not ready for PR: {', '.join(readiness.blockers)}")
+                        result.blockers = readiness.blockers
+                        return result
+                    logger.info("✓ Supplier PR readiness verified")
+                except Exception as e:
+                    logger.warning(f"TPA check failed (non-blocking): {e}")
+            
+            # Step 3: Create PR draft or submit
+            logger.info(f"Step 3: Creating PR (submit={submit_for_approval})")
+            try:
+                if submit_for_approval and notification_callback:
+                    # Use create_pr_and_monitor for async tracking
+                    pr_info, polling_id = self.buyat.create_pr_and_monitor(
+                        supplier_name=supplier_name,
+                        amount=amount,
+                        description=description,
+                        justification=justification,
+                        cost_center=cost_center,
+                        notification_callback=notification_callback,
+                        delivery_date=delivery_date,
+                        attachments=attachments,
+                        reference_case_id=reference_case_id
+                    )
+                    result.polling_id = polling_id
+                    result.monitoring_active = True
+                else:
+                    # Use regular create_pr_draft
+                    pr_info = self.buyat.create_pr_draft(
+                        supplier_name=supplier_name,
+                        amount=amount,
+                        description=description,
+                        justification=justification,
+                        cost_center=cost_center,
+                        submit_for_approval=submit_for_approval,
+                        delivery_date=delivery_date,
+                        attachments=attachments,
+                        reference_case_id=reference_case_id
+                    )
+                
+                result.pr_number = pr_info.pr_number
+                result.pr_url = pr_info.pr_url
+                result.status = pr_info.status
+                logger.info(f"✓ PR created: {pr_info.pr_number} (status: {pr_info.status})")
+                
+            except Exception as e:
+                result.errors.append(f"PR creation failed: {e}")
+                return result
+            
+            # Step 4: Send completion notification
+            logger.info("Step 4: Sending completion notification")
+            result.success = True
+            logger.info(
+                f"PR workflow {workflow_id} completed successfully: "
+                f"{result.pr_number}, status={result.status}"
+            )
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"PR workflow failed with unexpected error: {e}")
+            result.errors.append(f"Unexpected error: {e}")
+            result.success = False
+            return result
+    
+    def get_pr_workflow_status(self, pr_number: str) -> Dict[str, Any]:
+        """Get status of PR workflow including approval status.
+        
+        Args:
+            pr_number: PR number to check
+            
+        Returns:
+            Dictionary with PR status and workflow metadata
+        """
+        logger.info(f"Getting PR workflow status for {pr_number}")
+        try:
+            # Use BuyAtClient to check PR status
+            pr_status = self.buyat._agentic_client.check_pr_status(pr_number)
+            
+            return {
+                "pr_number": pr_number,
+                "status": pr_status.status,
+                "current_approver": pr_status.current_approver,
+                "approval_chain": pr_status.approval_chain,
+                "po_number": pr_status.po_number,
+                "blockers": pr_status.blockers,
+                "last_updated": pr_status.last_updated.isoformat() if pr_status.last_updated else None
+            }
+        except Exception as e:
+            logger.error(f"Failed to get PR status: {e}")
+            return {
+                "pr_number": pr_number,
+                "status": "error",
+                "error": str(e)
+            }

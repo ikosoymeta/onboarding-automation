@@ -14,6 +14,7 @@ from typing import Optional, Dict, Any, List
 from dataclasses import dataclass
 from pathlib import Path
 from datetime import datetime, timedelta
+from enum import Enum
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
 logger = logging.getLogger(__name__)
@@ -52,6 +53,66 @@ class AgenticResponse:
     has_followup: bool = False
     requires_confirmation: bool = False
     suggested_actions: List[str] = None
+
+
+class DocumentType(Enum):
+    """Types of documents for PR creation."""
+    CONTRACT = "contract"
+    QUOTE = "quote"
+    SOW = "sow"  # Statement of Work
+    INVOICE = "invoice"
+    PROPOSAL = "proposal"
+    UNKNOWN = "unknown"
+
+
+@dataclass
+class ExtractedField:
+    """A field extracted from a document with confidence score."""
+    value: Any
+    confidence: float  # 0.0 to 1.0
+    source: str  # Which part of document it came from
+
+
+@dataclass
+class PRDataExtraction:
+    """Result of extracting PR data from a document."""
+    supplier_name: Optional[ExtractedField] = None
+    amount: Optional[ExtractedField] = None
+    description: Optional[ExtractedField] = None
+    justification: Optional[ExtractedField] = None
+    cost_center: Optional[ExtractedField] = None
+    delivery_date: Optional[ExtractedField] = None
+    document_type: DocumentType = DocumentType.UNKNOWN
+    raw_text: str = ""
+    
+    def get_missing_required_fields(self) -> List[str]:
+        """Get list of required fields that are missing or low confidence."""
+        missing = []
+        required_fields = {
+            "supplier_name": self.supplier_name,
+            "amount": self.amount,
+            "description": self.description,
+            "cost_center": self.cost_center,
+        }
+        
+        for field_name, field in required_fields.items():
+            if field is None or field.confidence < 0.7:
+                missing.append(field_name)
+        
+        # Justification is required but often not in documents
+        if self.justification is None or self.justification.confidence < 0.7:
+            missing.append("justification")
+            
+        return missing
+    
+    def get_high_confidence_fields(self) -> Dict[str, Any]:
+        """Get fields extracted with high confidence (>0.7)."""
+        result = {}
+        for field_name in ["supplier_name", "amount", "description", "cost_center", "delivery_date"]:
+            field = getattr(self, field_name)
+            if field is not None and field.confidence >= 0.7:
+                result[field_name] = field.value
+        return result
 
 
 @dataclass
@@ -189,6 +250,81 @@ Please provide a list of matching PRs with:
 - Amount
 - Created Date
 - Current Approver (if applicable)
+"""
+
+    # Document-First PR Creation Templates (NEW)
+    PR_FROM_DOCUMENT_TEMPLATE = """Create a purchase request from the attached {document_type} document.
+
+The document has been uploaded and contains the following information (extracted with AI):
+{extracted_fields}
+
+Please:
+1. Create a PR using the extracted information
+2. For any fields with low confidence or missing, note them clearly
+3. Provide the PR number, URL, and list any fields that need manual review or completion
+
+Document Type: {document_type}
+File: {file_name}
+"""
+
+    PR_FROM_CONTRACT_TEMPLATE = """Create a purchase request from the attached CONTRACT document.
+
+Contracts typically contain:
+- Supplier legal name and details
+- Contract value and payment terms
+- Service/goods description
+- Contract start and end dates
+- Renewal terms
+
+Extract all relevant PR fields from the contract. Pay special attention to:
+- Total contract value (may need to be broken into PRs)
+- Supplier legal entity name (must match Buy@ exactly)
+- Contract dates (for service period)
+- Payment terms and milestones
+
+{extracted_fields}
+
+Create the PR and identify any fields requiring manual input.
+"""
+
+    PR_FROM_QUOTE_TEMPLATE = """Create a purchase request from the attached QUOTE document.
+
+Quotes typically contain:
+- Supplier name and contact info
+- Itemized pricing with quantities
+- Total amount
+- Quote validity dates
+- Terms and conditions
+
+Extract all PR fields from the quote. Focus on:
+- Line item details (description, quantity, unit price)
+- Total quoted amount
+- Quote expiration date (for urgency)
+- Supplier details
+
+{extracted_fields}
+
+Create the PR and list any missing required fields.
+"""
+
+    PR_FROM_SOW_TEMPLATE = """Create a purchase request from the attached Statement of Work (SOW) document.
+
+SOWs typically contain:
+- Detailed scope of work
+- Deliverables and milestones
+- Timeline and duration
+- Resource requirements
+- Pricing structure (fixed fee, T&M, etc.)
+
+Extract PR fields from the SOW, focusing on:
+- Scope description (for PR description)
+- Total value and payment schedule
+- Project timeline (for delivery dates)
+- Supplier information
+
+{extracted_fields}
+
+Create the PR and identify fields needing manual completion.
 """
     
     def __init__(
@@ -830,6 +966,216 @@ Please provide a list of matching PRs with:
             })
         
         return prs
+
+    def _detect_document_type(self, file_path: str) -> DocumentType:
+        """Detect document type from filename and content hints.
+        
+        Args:
+            file_path: Path to the document file
+            
+        Returns:
+            DocumentType enum value
+        """
+        filename = Path(file_path).name.lower()
+        
+        # Check filename patterns
+        if any(keyword in filename for keyword in ['contract', 'agreement', 'msa', 'psa']):
+            return DocumentType.CONTRACT
+        elif any(keyword in filename for keyword in ['quote', 'quotation', 'estimate']):
+            return DocumentType.QUOTE
+        elif any(keyword in filename for keyword in ['sow', 'statement_of_work', 'statementofwork']):
+            return DocumentType.SOW
+        elif any(keyword in filename for keyword in ['invoice', 'bill']):
+            return DocumentType.INVOICE
+        elif any(keyword in filename for keyword in ['proposal', 'rfp', 'rfq']):
+            return DocumentType.PROPOSAL
+        else:
+            return DocumentType.UNKNOWN
+
+    def create_pr_from_document(
+        self,
+        file_path: str,
+        document_type: Optional[DocumentType] = None,
+        additional_context: Optional[str] = None
+    ) -> PRDataExtraction:
+        """Create a PR by extracting data from a document (Document-First Workflow).
+        
+        Implements progressive disclosure: Uploads the document to Buy@ Assistant,
+        which extracts PR fields using AI. Returns extracted data with confidence
+        scores. The caller can then prompt user only for missing/low-confidence fields.
+        
+        This enables the workflow:
+        1. User uploads contract/quote/SOW
+        2. AI extracts supplier, amount, description, etc.
+        3. System asks only for fields that couldn't be extracted
+        4. User provides missing info
+        5. PR is created with combined data
+        
+        Args:
+            file_path: Path to the document (PDF, DOCX, etc.)
+            document_type: Optional document type. If not provided, auto-detected from filename.
+            additional_context: Optional context to help extraction (e.g., "This is for software licenses")
+            
+        Returns:
+            PRDataExtraction with extracted fields and confidence scores.
+            Use get_missing_required_fields() to identify what to ask user.
+            Use get_high_confidence_fields() to get extracted data.
+            
+        Thread-safe: Uses lock to prevent concurrent browser access.
+        
+        Example:
+            # User uploads contract
+            extraction = client.create_pr_from_document(
+                file_path="/path/to/contract.pdf",
+                document_type=DocumentType.CONTRACT
+            )
+            
+            # Check what was extracted
+            print(f"Supplier: {extraction.supplier_name.value} "
+                  f"(confidence: {extraction.supplier_name.confidence})")
+            
+            # Get missing fields to ask user
+            missing = extraction.get_missing_required_fields()
+            # Returns: ['justification', 'cost_center'] (if not in doc)
+            
+            # Get high-confidence fields to use directly
+            fields = extraction.get_high_confidence_fields()
+            # Returns: {'supplier_name': 'Acme Corp', 'amount': 5000.0, ...}
+        """
+        logger.info(f"Creating PR from document: {file_path}")
+        
+        with self._lock:
+            # Detect document type if not provided
+            if document_type is None:
+                document_type = self._detect_document_type(file_path)
+            
+            logger.info(f"Document type detected: {document_type.value}")
+            
+            # Upload the document first
+            try:
+                doc_id = self.upload_document(file_path)
+                logger.info(f"Document uploaded: {doc_id}")
+            except Exception as e:
+                logger.error(f"Failed to upload document: {e}")
+                raise AgenticFlowError(f"Document upload failed: {e}")
+            
+            # Select appropriate template based on document type
+            if document_type == DocumentType.CONTRACT:
+                template = self.PR_FROM_CONTRACT_TEMPLATE
+            elif document_type == DocumentType.QUOTE:
+                template = self.PR_FROM_QUOTE_TEMPLATE
+            elif document_type == DocumentType.SOW:
+                template = self.PR_FROM_SOW_TEMPLATE
+            else:
+                template = self.PR_FROM_DOCUMENT_TEMPLATE
+            
+            # Build prompt with document info
+            # Note: In a real implementation, the Buy@ Assistant would return
+            # structured data with confidence scores. Here we simulate that
+            # by asking the Assistant to extract and it returns text we parse.
+            file_name = Path(file_path).name
+            extracted_fields_text = (
+                f"Document uploaded: {doc_id}\n"
+                f"Please extract all relevant PR fields from this {document_type.value}."
+            )
+            if additional_context:
+                extracted_fields_text += f"\nContext: {additional_context}"
+            
+            prompt = template.format(
+                document_type=document_type.value,
+                file_name=file_name,
+                extracted_fields=extracted_fields_text
+            )
+            
+            # Send to Buy@ Assistant for extraction
+            response = self.send_message(prompt)
+            
+            # Parse the response to extract fields with confidence
+            # In production, the Assistant would return structured data.
+            # Here we parse the text response and simulate confidence scores.
+            extraction = self._parse_document_extraction(
+                response.message,
+                document_type,
+                file_path
+            )
+            
+            logger.info(
+                f"Document extraction complete. "
+                f"High-confidence fields: {len(extraction.get_high_confidence_fields())}, "
+                f"Missing: {len(extraction.get_missing_required_fields())}"
+            )
+            
+            return extraction
+
+    def _parse_document_extraction(
+        self,
+        message: str,
+        document_type: DocumentType,
+        file_path: str
+    ) -> PRDataExtraction:
+        """Parse document extraction results from Assistant response.
+        
+        In production, the Buy@ Assistant would return structured data with
+        confidence scores. This is a simplified parser that extracts fields
+        from text and assigns simulated confidence scores.
+        
+        Args:
+            message: Assistant response text
+            document_type: Type of document
+            file_path: Original file path
+            
+        Returns:
+            PRDataExtraction with parsed fields
+        """
+        import re
+        
+        extraction = PRDataExtraction(
+            document_type=document_type,
+            raw_text=message
+        )
+        
+        # Extract supplier name (look for patterns)
+        supplier_match = re.search(
+            r'supplier[:\s]+([^\n]+)', message, re.IGNORECASE
+        )
+        if supplier_match:
+            extraction.supplier_name = ExtractedField(
+                value=supplier_match.group(1).strip(),
+                confidence=0.85,
+                source="document_text"
+            )
+        
+        # Extract amount (look for $ amounts)
+        amount_match = re.search(
+            r'\$[\s]*([0-9,]+\.?[0-9]*)', message
+        )
+        if amount_match:
+            amount_str = amount_match.group(1).replace(',', '')
+            try:
+                extraction.amount = ExtractedField(
+                    value=float(amount_str),
+                    confidence=0.90,
+                    source="document_text"
+                )
+            except ValueError:
+                pass
+        
+        # Extract description (look for description field)
+        desc_match = re.search(
+            r'description[:\s]+([^\n]+)', message, re.IGNORECASE
+        )
+        if desc_match:
+            extraction.description = ExtractedField(
+                value=desc_match.group(1).strip(),
+                confidence=0.75,
+                source="document_text"
+            )
+        
+        # Note: Justification and cost_center are typically NOT in supplier
+        # documents (they're internal Meta information), so they will usually
+        # be missing and need to be asked from the user.
+        
+        return extraction
 
     def upload_document(self, file_path: str) -> str:
         """Upload a document to the Buy@ Assistant for PR attachment.
@@ -1642,14 +1988,119 @@ class BuyAtClient:
             })
         """
         logger.info(f"Searching PRs via BuyAtClient with criteria: {criteria}")
-        
         if not self.use_agentic or not self._agentic_client:
             raise BuyAtError(
                 "PR search requires agentic flow. "
+                "Initialize BuyAtClient with use_agentic=True"
+            )
+        if not self._agentic_client.is_started():
+            self.start_agentic_session()
+        return self._agentic_client.search_prs(criteria)
+
+    def create_pr_from_document(
+        self,
+        file_path: str,
+        document_type: Optional[str] = None,
+        additional_context: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Create a PR by extracting data from a document (Document-First Workflow).
+        
+        Implements progressive disclosure: Uploads document to Buy@ Assistant,
+        which extracts PR fields using AI. Returns extracted data and list of
+        missing fields that user needs to provide.
+        
+        This enables the workflow:
+        1. User uploads contract/quote/SOW
+        2. AI extracts supplier, amount, description, etc.
+        3. System asks only for missing fields (progressive disclosure)
+        4. User provides missing info
+        5. PR is created with combined data
+        
+        Args:
+            file_path: Path to the document (PDF, DOCX, etc.)
+            document_type: Optional type hint ('contract', 'quote', 'sow', 'invoice', 'proposal')
+            additional_context: Optional context to help extraction
+            
+        Returns:
+            Dictionary with:
+            - 'extracted': Dict of fields extracted with high confidence
+            - 'missing': List of required fields still needed from user
+            - 'document_type': Detected document type
+            - 'suggested_next_steps': What user should do next
+            
+        Example:
+            # User uploads contract
+            result = client.create_pr_from_document(
+                file_path="/path/to/contract.pdf",
+                document_type="contract",
+                additional_context="Software licenses for Project X"
+            )
+            
+            # Check what was extracted
+            print(result['extracted'])
+            # {'supplier_name': 'Acme Corp', 'amount': 5000.0, ...}
+            
+            # See what's missing
+            print(result['missing'])
+            # ['justification', 'cost_center']
+            
+            # User provides missing fields, then create PR
+        """
+        from .client import DocumentType
+        
+        logger.info(f"Creating PR from document via BuyAtClient: {file_path}")
+        
+        if not self.use_agentic or not self._agentic_client:
+            raise BuyAtError(
+                "Document-based PR creation requires agentic flow. "
                 "Initialize BuyAtClient with use_agentic=True"
             )
         
         if not self._agentic_client.is_started():
             self.start_agentic_session()
         
-        return self._agentic_client.search_prs(criteria)
+        # Convert string document_type to enum if provided
+        doc_type = None
+        if document_type:
+            try:
+                doc_type = DocumentType(document_type.lower())
+            except ValueError:
+                logger.warning(f"Unknown document type: {document_type}, using auto-detection")
+        
+        # Call AgenticBuyingClient method
+        extraction = self._agentic_client.create_pr_from_document(
+            file_path=file_path,
+            document_type=doc_type,
+            additional_context=additional_context
+        )
+        
+        # Format result for user
+        result = {
+            "extracted": extraction.get_high_confidence_fields(),
+            "missing": extraction.get_missing_required_fields(),
+            "document_type": extraction.document_type.value,
+            "suggested_next_steps": []
+        }
+        
+        # Add suggestions based on what's missing
+        if result["missing"]:
+            result["suggested_next_steps"].append(
+                f"Please provide the following missing information: {', '.join(result['missing'])}"
+            )
+        else:
+            result["suggested_next_steps"].append(
+                "All required fields extracted successfully. Ready to create PR."
+            )
+        
+        if extraction.document_type == DocumentType.UNKNOWN:
+            result["suggested_next_steps"].append(
+                "Document type could not be determined. Please specify if this is a contract, quote, SOW, or invoice."
+            )
+        
+        logger.info(
+            f"Document PR extraction complete: "
+            f"{len(result['extracted'])} fields extracted, "
+            f"{len(result['missing'])} fields missing"
+        )
+        
+        return result
