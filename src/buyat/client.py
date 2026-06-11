@@ -154,6 +154,42 @@ Please provide:
 4. PO number (if approved)
 5. Any blockers or issues
 """
+
+    # Additional PR MCP Tool Templates (NEW)
+    PR_UPDATE_TEMPLATE = """Update purchase request {pr_number} with the following changes:
+
+{updates}
+
+Please confirm the updates have been applied and provide the updated PR details.
+"""
+
+    PR_JUSTIFICATION_TEMPLATE = """Generate a business justification for the following purchase request:
+
+Supplier: {supplier_name}
+Amount: ${amount:,.2f}
+Description: {description}
+Cost Center: {cost_center}
+{additional_context}
+
+Please provide a compelling business justification that explains:
+1. Why this purchase is necessary
+2. Business value and impact
+3. Urgency and timing
+4. Alternatives considered (if any)
+"""
+
+    PR_SEARCH_TEMPLATE = """Search for purchase requests with the following criteria:
+
+{criteria}
+
+Please provide a list of matching PRs with:
+- PR Number
+- Status
+- Supplier
+- Amount
+- Created Date
+- Current Approver (if applicable)
+"""
     
     def __init__(
         self, 
@@ -666,6 +702,134 @@ Please provide:
         
         logger.info(f"PR {pr_number} status: {status}")
         return pr_status
+
+    def update_pr(self, pr_number: str, updates: Dict[str, Any]) -> PRStatus:
+        """Update an existing purchase request via Buy@ Assistant.
+        
+        Uses MetamateAgentBuyAtPurchaseRequestUpdateTool to modify PR fields.
+        Can update quantities, prices, add line items, change delivery dates, etc.
+        
+        Args:
+            pr_number: The PR number to update
+            updates: Dictionary of field updates (e.g., {"quantity": 10, "price": 500.00})
+            
+        Returns:
+            PRStatus with updated PR details
+            
+        Thread-safe: Uses lock to prevent concurrent browser access.
+        """
+        logger.info(f"Updating PR {pr_number} with {len(updates)} changes")
+        
+        with self._lock:
+            # Format updates as readable text
+            updates_text = "\n".join([f"- {k}: {v}" for k, v in updates.items()])
+            
+            prompt = self.PR_UPDATE_TEMPLATE.format(
+                pr_number=pr_number,
+                updates=updates_text
+            )
+            
+            response = self.send_message(prompt)
+            
+            # Parse updated status
+            status = self._parse_pr_status(response.message)
+            logger.info(f"PR {pr_number} updated, new status: {status}")
+            
+            # Return updated status
+            return self.check_pr_status(pr_number)
+
+    def generate_justification(
+        self,
+        supplier_name: str,
+        amount: float,
+        description: str,
+        cost_center: str,
+        additional_context: Optional[str] = None
+    ) -> str:
+        """Generate AI-powered business justification for a PR.
+        
+        Uses MetamateAgentBuyAtPurchaseRequestJustificationTool to create
+        compelling business justifications that improve approval speed.
+        
+        Args:
+            supplier_name: Name of the supplier
+            amount: PR amount in USD
+            description: Description of goods/services
+            cost_center: Cost center for charging
+            additional_context: Optional additional context (urgency, alternatives, etc.)
+            
+        Returns:
+            Generated justification text
+            
+        Thread-safe: Uses lock to prevent concurrent browser access.
+        """
+        logger.info(f"Generating justification for {supplier_name} PR")
+        
+        with self._lock:
+            context = f"\nAdditional Context: {additional_context}" if additional_context else ""
+            
+            prompt = self.PR_JUSTIFICATION_TEMPLATE.format(
+                supplier_name=supplier_name,
+                amount=amount,
+                description=description,
+                cost_center=cost_center,
+                additional_context=context
+            )
+            
+            response = self.send_message(prompt)
+            justification = response.message
+            
+            logger.info(f"Justification generated ({len(justification)} chars)")
+            return justification
+
+    def search_prs(self, criteria: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Search for purchase requests by criteria.
+        
+        Uses MetamateAgentBuyAtPurchaseRequestSearchTool to find PRs
+        matching specified filters.
+        
+        Args:
+            criteria: Search criteria (e.g., {"supplier": "Acme", "status": "approved", 
+                     "date_from": "2026-01-01", "amount_min": 1000})
+            
+        Returns:
+            List of matching PRs with details (PR number, status, supplier, amount, etc.)
+            
+        Thread-safe: Uses lock to prevent concurrent browser access.
+        """
+        logger.info(f"Searching PRs with criteria: {criteria}")
+        
+        with self._lock:
+            # Format criteria as readable text
+            criteria_text = "\n".join([f"- {k}: {v}" for k, v in criteria.items()])
+            
+            prompt = self.PR_SEARCH_TEMPLATE.format(criteria=criteria_text)
+            
+            response = self.send_message(prompt)
+            
+            # Parse PR list from response (simplified)
+            # In production, would use more robust parsing
+            prs = self._parse_pr_search_results(response.message)
+            
+            logger.info(f"Found {len(prs)} matching PRs")
+            return prs
+
+    def _parse_pr_search_results(self, message: str) -> List[Dict[str, Any]]:
+        """Parse PR search results from assistant response."""
+        import re
+        prs = []
+        
+        # Look for PR patterns in the message
+        # This is simplified - production would need more robust parsing
+        pr_matches = re.finditer(r'PR[-\s#]*(\d+)', message, re.IGNORECASE)
+        for match in pr_matches:
+            pr_number = f"PR-{match.group(1)}"
+            prs.append({
+                "pr_number": pr_number,
+                "status": "unknown",  # Would extract from context
+            })
+        
+        return prs
 
     def upload_document(self, file_path: str) -> str:
         """Upload a document to the Buy@ Assistant for PR attachment.
@@ -1382,10 +1546,110 @@ class BuyAtClient:
             max_duration=max_duration
         )
         polling_id = manager.start_polling()
-        
         logger.info(
             f"PR created with monitoring: {pr_info.pr_number}, "
             f"polling_id={polling_id}"
         )
-        
         return pr_info, polling_id
+
+    def update_pr(self, pr_number: str, updates: Dict[str, Any]) -> PRStatus:
+        """Update an existing purchase request.
+        
+        Uses Buy@ Assistant to modify PR fields such as quantities, prices,
+        delivery dates, or add line items.
+        
+        Args:
+            pr_number: The PR number to update (e.g., "PR-12345")
+            updates: Dictionary of field updates
+            
+        Returns:
+            PRStatus with updated PR details
+            
+        Example:
+            client.update_pr("PR-12345", {"quantity": 10, "price": 500.00})
+        """
+        logger.info(f"Updating PR {pr_number} via BuyAtClient")
+        
+        if not self.use_agentic or not self._agentic_client:
+            raise BuyAtError(
+                "PR update requires agentic flow. "
+                "Initialize BuyAtClient with use_agentic=True"
+            )
+        
+        if not self._agentic_client.is_started():
+            self.start_agentic_session()
+        
+        return self._agentic_client.update_pr(pr_number, updates)
+
+    def generate_justification(
+        self,
+        supplier_name: str,
+        amount: float,
+        description: str,
+        cost_center: str,
+        additional_context: Optional[str] = None
+    ) -> str:
+        """Generate AI-powered business justification for a PR.
+        
+        Uses Buy@ Assistant to create compelling justification text
+        that improves approval speed.
+        
+        Args:
+            supplier_name: Name of the supplier
+            amount: PR amount in USD
+            description: Description of goods/services
+            cost_center: Cost center for charging
+            additional_context: Optional context (urgency, alternatives, etc.)
+            
+        Returns:
+            Generated justification text
+        """
+        logger.info(f"Generating justification for {supplier_name} PR")
+        
+        if not self.use_agentic or not self._agentic_client:
+            raise BuyAtError(
+                "Justification generation requires agentic flow. "
+                "Initialize BuyAtClient with use_agentic=True"
+            )
+        
+        if not self._agentic_client.is_started():
+            self.start_agentic_session()
+        
+        return self._agentic_client.generate_justification(
+            supplier_name=supplier_name,
+            amount=amount,
+            description=description,
+            cost_center=cost_center,
+            additional_context=additional_context
+        )
+
+    def search_prs(self, criteria: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Search for purchase requests by criteria.
+        
+        Uses Buy@ Assistant to find PRs matching specified filters.
+        
+        Args:
+            criteria: Search criteria (supplier, status, date range, amount, etc.)
+            
+        Returns:
+            List of matching PRs with details
+            
+        Example:
+            client.search_prs({
+                "supplier": "Acme Corp",
+                "status": "approved",
+                "date_from": "2026-01-01"
+            })
+        """
+        logger.info(f"Searching PRs via BuyAtClient with criteria: {criteria}")
+        
+        if not self.use_agentic or not self._agentic_client:
+            raise BuyAtError(
+                "PR search requires agentic flow. "
+                "Initialize BuyAtClient with use_agentic=True"
+            )
+        
+        if not self._agentic_client.is_started():
+            self.start_agentic_session()
+        
+        return self._agentic_client.search_prs(criteria)
