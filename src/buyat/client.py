@@ -261,19 +261,23 @@ Please provide:
                 self._playwright = None
     
     def _take_screenshot(self, prefix: str = "agentic_error"):
-        """Take screenshot for debugging."""
+        """Take screenshot for debugging.
+        
+        Thread-safe: Uses lock to prevent concurrent browser access.
+        """
         try:
-            # Check if page is available before attempting screenshot
-            if self._page is None:
-                logger.debug("Cannot take screenshot: page not initialized")
-                return None
-            
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"buyat_{prefix}_{timestamp}.png"
-            filepath = self.screenshot_dir / filename
-            self._page.screenshot(path=str(filepath))
-            logger.info(f"Screenshot saved to {filepath}")
-            return str(filepath)
+            with self._lock:
+                # Check if page is available before attempting screenshot
+                if self._page is None:
+                    logger.debug("Cannot take screenshot: page not initialized")
+                    return None
+                
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"buyat_{prefix}_{timestamp}.png"
+                filepath = self.screenshot_dir / filename
+                self._page.screenshot(path=str(filepath))
+                logger.info(f"Screenshot saved to {filepath}")
+                return str(filepath)
         except Exception as e:
             logger.error(f"Failed to take screenshot: {e}")
             return None
@@ -287,46 +291,53 @@ Please provide:
         return self._browser is not None and self._page is not None
     
     def navigate_to_suppliers(self):
-        """Navigate to the Suppliers page where buy@ assistant is available."""
-        if not self._page:
-            raise AgenticFlowError("Browser not started. Call start() first.")
+        """Navigate to the Suppliers page where buy@ assistant is available.
         
-        logger.info(f"Navigating to Suppliers page: {self.SUPPLIERS_URL}")
-        self._page.goto(self.SUPPLIERS_URL, timeout=self.PAGE_LOAD_TIMEOUT)
-        self._page.wait_for_load_state("networkidle")
+        Thread-safe: Uses lock to prevent concurrent browser access.
+        """
+        with self._lock:
+            if not self._page:
+                raise AgenticFlowError("Browser not started. Call start() first.")
+            
+            logger.info(f"Navigating to Suppliers page: {self.SUPPLIERS_URL}")
+            self._page.goto(self.SUPPLIERS_URL, timeout=self.PAGE_LOAD_TIMEOUT)
+            self._page.wait_for_load_state("networkidle")
     
     def open_assistant(self):
         """Open the buy@ assistant side panel.
         
         The assistant appears as a button in the top-right corner of
         buy@ pages. Clicking it opens the chat interface.
-        """
-        if not self._page:
-            raise AgenticFlowError("Browser not started. Call start() first.")
         
-        logger.info("Opening buy@ assistant panel")
-        try:
-            # Look for the buy@ assistant button (top right)
-            # Based on screenshot: blue button with "buy@ assistant" text
-            assistant_button = self._page.locator(
-                'button:has-text("buy@ assistant")'
-            ).first
+        Thread-safe: Uses lock to prevent concurrent browser access.
+        """
+        with self._lock:
+            if not self._page:
+                raise AgenticFlowError("Browser not started. Call start() first.")
             
-            if assistant_button.is_visible(timeout=5000):
-                assistant_button.click()
-                # Wait for assistant panel to open
-                self._page.wait_for_selector(
-                    'text="buy@ assistant"', 
-                    timeout=10000
-                )
-                self._assistant_open = True
-                logger.info("buy@ assistant panel opened successfully")
-            else:
-                raise AgenticFlowError("buy@ assistant button not found")
+            logger.info("Opening buy@ assistant panel")
+            try:
+                # Look for the buy@ assistant button (top right)
+                # Based on screenshot: blue button with "buy@ assistant" text
+                assistant_button = self._page.locator(
+                    'button:has-text("buy@ assistant")'
+                ).first
                 
-        except PlaywrightTimeoutError as e:
-            self._take_screenshot("assistant_open_timeout")
-            raise AgenticFlowError(f"Failed to open assistant: {e}")
+                if assistant_button.is_visible(timeout=5000):
+                    assistant_button.click()
+                    # Wait for assistant panel to open
+                    self._page.wait_for_selector(
+                        'text="buy@ assistant"', 
+                        timeout=10000
+                    )
+                    self._assistant_open = True
+                    logger.info("buy@ assistant panel opened successfully")
+                else:
+                    raise AgenticFlowError("buy@ assistant button not found")
+                    
+            except PlaywrightTimeoutError as e:
+                self._take_screenshot("assistant_open_timeout")
+                raise AgenticFlowError(f"Failed to open assistant: {e}")
     
     def send_message(self, message: str) -> AgenticResponse:
         """Send a message to the buy@ assistant.
@@ -336,45 +347,80 @@ Please provide:
             
         Returns:
             AgenticResponse with the assistant's reply
+        
+        Thread-safe: Uses lock to prevent concurrent browser access.
         """
-        if not self._assistant_open:
-            raise AgenticFlowError("Assistant not open. Call open_assistant() first.")
-        
-        # Log without sensitive message content
-        logger.info("Sending message to buy@ assistant")
-        
-        try:
-            # Find the chat input field (based on screenshot: "Ask buy@ assistant...")
-            chat_input = self._page.locator(
-                'input[placeholder*="Ask buy@ assistant"]'
-            ).first
+        with self._lock:
+            if not self._assistant_open:
+                raise AgenticFlowError("Assistant not open. Call open_assistant() first.")
             
-            if not chat_input.is_visible(timeout=5000):
-                # Try alternative selector
+            # Log without sensitive message content
+            logger.info("Sending message to buy@ assistant")
+            
+            try:
+                # Find the chat input field (based on screenshot: "Ask buy@ assistant...")
                 chat_input = self._page.locator(
-                    'textarea[placeholder*="Ask buy@"]'
+                    'input[placeholder*="Ask buy@ assistant"]'
                 ).first
-            
-            chat_input.fill(message)
-            
-            # Find and click send button (arrow icon in screenshot)
-            send_button = self._page.locator(
-                'button[type="submit"]'
-            ).first
-            
-            if send_button.is_visible(timeout=2000):
-                send_button.click()
-            else:
-                # Try pressing Enter
-                chat_input.press("Enter")
-            
-            # Wait for assistant response
-            response = self._wait_for_response()
-            return response
-            
-        except PlaywrightTimeoutError as e:
-            self._take_screenshot("send_message_timeout")
-            raise AgenticFlowError(f"Failed to send message: {e}")
+                
+                if not chat_input.is_visible(timeout=5000):
+                    # Try alternative selector
+                    chat_input = self._page.locator(
+                        'textarea[placeholder*="Ask buy@"]'
+                    ).first
+                
+                chat_input.fill(message)
+                
+                # Find and click send button (arrow icon in screenshot)
+                send_button = self._page.locator(
+                    'button[type="submit"]'
+                ).first
+                
+                if send_button.is_visible(timeout=2000):
+                    send_button.click()
+                else:
+                    # Try pressing Enter
+                    chat_input.press("Enter")
+                
+                # Wait for assistant response
+                # Note: _wait_for_response also acquires the lock, but since we already
+                # hold it (RLock would be needed for reentrancy), we call the inner logic directly
+                # For simplicity, we release lock before calling _wait_for_response and re-acquire after
+                # Actually, let's just inline the wait logic here to avoid lock reentrancy issues
+                
+                # Wait for response to appear (look for message bubbles)
+                logger.debug("Waiting for assistant response")
+                message_selector = '[data-testid="assistant-message"], .assistant-message, [class*="assistant"]'
+                self._page.wait_for_selector(
+                    message_selector,
+                    timeout=self.AGENT_RESPONSE_TIMEOUT
+                )
+                
+                # Get the latest assistant message
+                messages = self._page.locator(message_selector).all()
+                
+                if messages:
+                    latest_message = messages[-1].inner_text()
+                    logger.info(f"Assistant response: {latest_message[:200]}...")
+                    
+                    # Check if response requires confirmation or has follow-ups
+                    has_followup = "?" in latest_message or "please" in latest_message.lower()
+                    requires_confirmation = any(
+                        word in latest_message.lower() 
+                        for word in ["confirm", "review", "approve", "submit"]
+                    )
+                    
+                    return AgenticResponse(
+                        message=latest_message,
+                        has_followup=has_followup,
+                        requires_confirmation=requires_confirmation
+                    )
+                else:
+                    raise AgenticFlowError("No assistant response found")
+                    
+            except PlaywrightTimeoutError as e:
+                self._take_screenshot("send_message_timeout")
+                raise AgenticFlowError(f"Failed to send message: {e}")
     
     def _wait_for_response(self) -> AgenticResponse:
         """Wait for and parse the assistant's response.
@@ -632,51 +678,54 @@ Please provide:
             
         Raises:
             AgenticFlowError: If upload fails
+        
+        Thread-safe: Uses lock to prevent concurrent browser access.
         """
-        if not self._page:
-            raise AgenticFlowError("Browser not started. Call start() first.")
-        
-        if not self._assistant_open:
-            raise AgenticFlowError("Assistant not open. Call open_assistant() first.")
-        
-        logger.info(f"Uploading document: {file_path}")
-        
-        try:
-            # Find the file upload button or area
-            # Based on typical Buy@ Assistant UI, there's usually a paperclip icon
-            upload_button = self._page.locator(
-                'button[aria-label*="attach"], button[aria-label*="upload"], '
-                'input[type="file"]'
-            ).first
+        with self._lock:
+            if not self._page:
+                raise AgenticFlowError("Browser not started. Call start() first.")
             
-            if upload_button.is_visible(timeout=5000):
-                # If it's a file input, set the file directly
-                if upload_button.get_attribute("type") == "file":
-                    upload_button.set_input_files(file_path)
+            if not self._assistant_open:
+                raise AgenticFlowError("Assistant not open. Call open_assistant() first.")
+            
+            logger.info(f"Uploading document: {file_path}")
+            
+            try:
+                # Find the file upload button or area
+                # Based on typical Buy@ Assistant UI, there's usually a paperclip icon
+                upload_button = self._page.locator(
+                    'button[aria-label*="attach"], button[aria-label*="upload"], '
+                    'input[type="file"]'
+                ).first
+                
+                if upload_button.is_visible(timeout=5000):
+                    # If it's a file input, set the file directly
+                    if upload_button.get_attribute("type") == "file":
+                        upload_button.set_input_files(file_path)
+                    else:
+                        # Click the button and handle file chooser
+                        with self._page.expect_file_chooser() as fc_info:
+                            upload_button.click()
+                        file_chooser = fc_info.value
+                        file_chooser.set_files(file_path)
+                    
+                    # Wait for upload to complete
+                    self._page.wait_for_timeout(2000)
+                    
+                    # Try to get the document ID from the UI
+                    # This may need adjustment based on actual DOM structure
+                    doc_id = Path(file_path).name  # Fallback to filename
+                    logger.info(f"Document uploaded successfully: {doc_id}")
+                    return doc_id
                 else:
-                    # Click the button and handle file chooser
-                    with self._page.expect_file_chooser() as fc_info:
-                        upload_button.click()
-                    file_chooser = fc_info.value
-                    file_chooser.set_files(file_path)
-                
-                # Wait for upload to complete
-                self._page.wait_for_timeout(2000)
-                
-                # Try to get the document ID from the UI
-                # This may need adjustment based on actual DOM structure
-                doc_id = Path(file_path).name  # Fallback to filename
-                logger.info(f"Document uploaded successfully: {doc_id}")
-                return doc_id
-            else:
-                raise AgenticFlowError("File upload button not found")
-                
-        except PlaywrightTimeoutError as e:
-            self._take_screenshot("upload_timeout")
-            raise AgenticFlowError(f"Failed to upload document: {e}")
-        except Exception as e:
-            self._take_screenshot("upload_error")
-            raise AgenticFlowError(f"Document upload failed: {e}")
+                    raise AgenticFlowError("File upload button not found")
+                    
+            except PlaywrightTimeoutError as e:
+                self._take_screenshot("upload_timeout")
+                raise AgenticFlowError(f"Failed to upload document: {e}")
+            except Exception as e:
+                self._take_screenshot("upload_error")
+                raise AgenticFlowError(f"Document upload failed: {e}")
 
     def _extract_pr_number(self, message: str) -> Optional[str]:
         """Extract PR number from assistant response."""

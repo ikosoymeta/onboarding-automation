@@ -144,6 +144,7 @@ class PRPollingManager:
         Args:
             polling_id: The polling ID returned by start_polling()
         """
+        thread_to_join = None
         with self._lock:
             if polling_id not in self._polling_states:
                 logger.warning(f"Polling ID not found: {polling_id}")
@@ -152,6 +153,8 @@ class PRPollingManager:
             state = self._polling_states[polling_id]
             if state.status != "active":
                 logger.info(f"Polling already stopped: {polling_id}")
+                # Cleanup if not already done
+                self._cleanup_polling_session(polling_id)
                 return
             
             # Signal thread to stop
@@ -160,7 +163,29 @@ class PRPollingManager:
                 stop_event.set()
             
             state.status = "stopped"
+            thread_to_join = self._polling_threads.get(polling_id)
             logger.info(f"Stopped polling: {polling_id}")
+        
+        # Wait for thread to finish outside the lock
+        if thread_to_join and thread_to_join.is_alive():
+            thread_to_join.join(timeout=5.0)
+        
+        # Cleanup the session
+        with self._lock:
+            self._cleanup_polling_session(polling_id)
+
+    def _cleanup_polling_session(self, polling_id: str) -> None:
+        """Remove polling session from internal dictionaries to prevent memory leaks.
+        
+        Must be called with self._lock held.
+        
+        Args:
+            polling_id: The polling ID to clean up
+        """
+        self._polling_states.pop(polling_id, None)
+        self._polling_threads.pop(polling_id, None)
+        self._stop_events.pop(polling_id, None)
+        logger.debug(f"Cleaned up polling session: {polling_id}")
     
     def get_polling_status(self, polling_id: str) -> Dict[str, Any]:
         """Get current polling status.
@@ -197,88 +222,115 @@ class PRPollingManager:
         """
         logger.info(f"Polling loop started for {polling_id}")
         
+        # Get initial state and start time
         with self._lock:
             state = self._polling_states.get(polling_id)
             if not state:
                 logger.error(f"Polling state not found: {polling_id}")
                 return
+            start_time = state.start_time
         
-        start_time = state.start_time
         last_status = None
         
-        while not stop_event.is_set():
-            # Check if max duration exceeded
-            elapsed = (datetime.utcnow() - start_time).total_seconds()
-            if elapsed > self.max_duration:
-                logger.info(
-                    f"Max duration exceeded for {polling_id}, "
-                    f"elapsed={elapsed}s, max={self.max_duration}s"
-                )
+        try:
+            while not stop_event.is_set():
+                # Re-acquire state under lock at start of each iteration
+                # to ensure we have the latest state and it hasn't been cleaned up
                 with self._lock:
-                    state.status = "completed"
-                break
-            
-            try:
-                # Check PR status
-                pr_status = self.agentic_client.check_pr_status(self.pr_number)
+                    state = self._polling_states.get(polling_id)
+                    if not state:
+                        logger.info(f"Polling state removed for {polling_id}, exiting loop")
+                        break
+                    if state.status != "active":
+                        logger.info(f"Polling state not active for {polling_id}: {state.status}")
+                        break
                 
-                with self._lock:
-                    state.last_check = datetime.utcnow()
-                    state.check_count += 1
-                    state.last_status = pr_status.status
-                    state.error_count = 0  # Reset error count on success
-                
-                # Check if status changed
-                if last_status != pr_status.status:
+                # Check if max duration exceeded
+                elapsed = (datetime.utcnow() - start_time).total_seconds()
+                if elapsed > self.max_duration:
                     logger.info(
-                        f"PR {self.pr_number} status changed: "
-                        f"{last_status} -> {pr_status.status}"
+                        f"Max duration exceeded for {polling_id}, "
+                        f"elapsed={elapsed}s, max={self.max_duration}s"
                     )
-                    
-                    # Determine event type
-                    event_type = "status_update"
-                    if pr_status.status == "approved":
-                        event_type = "approved"
-                    elif pr_status.status == "rejected":
-                        event_type = "rejected"
-                    elif pr_status.status == "submitted":
-                        event_type = "submitted"
-                    
-                    # Invoke notification callback
-                    if self.notification_callback:
-                        try:
-                            self.notification_callback(pr_status, event_type)
-                        except Exception as e:
-                            logger.error(f"Notification callback failed: {e}")
-                    
-                    last_status = pr_status.status
-                    
-                    # Stop polling if PR is in terminal state
-                    if pr_status.status in ["approved", "rejected"]:
-                        logger.info(
-                            f"PR {self.pr_number} reached terminal state: "
-                            f"{pr_status.status}, stopping polling"
-                        )
-                        with self._lock:
+                    with self._lock:
+                        state = self._polling_states.get(polling_id)
+                        if state:
                             state.status = "completed"
-                        break
+                    break
                 
-            except Exception as e:
-                logger.error(f"Error checking PR status for {polling_id}: {e}")
-                with self._lock:
-                    state.error_count += 1
-                    if state.error_count >= self.max_errors:
-                        logger.error(
-                            f"Max errors exceeded for {polling_id}, "
-                            f"errors={state.error_count}, stopping"
+                try:
+                    # Check PR status
+                    pr_status = self.agentic_client.check_pr_status(self.pr_number)
+                    
+                    with self._lock:
+                        state = self._polling_states.get(polling_id)
+                        if not state:
+                            break
+                        state.last_check = datetime.utcnow()
+                        state.check_count += 1
+                        state.last_status = pr_status.status
+                        state.error_count = 0  # Reset error count on success
+                    
+                    # Check if status changed
+                    if last_status != pr_status.status:
+                        logger.info(
+                            f"PR {self.pr_number} status changed: "
+                            f"{last_status} -> {pr_status.status}"
                         )
-                        state.status = "error"
-                        break
-            
-            # Wait for next poll interval or stop signal
-            stop_event.wait(timeout=self.poll_interval)
+                        
+                        # Determine event type
+                        event_type = "status_update"
+                        if pr_status.status == "approved":
+                            event_type = "approved"
+                        elif pr_status.status == "rejected":
+                            event_type = "rejected"
+                        elif pr_status.status == "submitted":
+                            event_type = "submitted"
+                        
+                        # Invoke notification callback
+                        if self.notification_callback:
+                            try:
+                                self.notification_callback(pr_status, event_type)
+                            except Exception as e:
+                                logger.error(f"Notification callback failed: {e}")
+                        
+                        last_status = pr_status.status
+                        
+                        # Stop polling if PR is in terminal state
+                        if pr_status.status in ["approved", "rejected"]:
+                            logger.info(
+                                f"PR {self.pr_number} reached terminal state: "
+                                f"{pr_status.status}, stopping polling"
+                            )
+                            with self._lock:
+                                state = self._polling_states.get(polling_id)
+                                if state:
+                                    state.status = "completed"
+                            break
+                    
+                except Exception as e:
+                    logger.error(f"Error checking PR status for {polling_id}: {e}")
+                    with self._lock:
+                        state = self._polling_states.get(polling_id)
+                        if not state:
+                            break
+                        state.error_count += 1
+                        if state.error_count >= self.max_errors:
+                            logger.error(
+                                f"Max errors exceeded for {polling_id}, "
+                                f"errors={state.error_count}, stopping"
+                            )
+                            state.status = "error"
+                            break
+                
+                # Wait for next poll interval or stop signal
+                stop_event.wait(timeout=self.poll_interval)
         
-        logger.info(f"Polling loop ended for {polling_id}")
+        finally:
+            # Cleanup the polling session to prevent memory leaks
+            with self._lock:
+                self._cleanup_polling_session(polling_id)
+            logger.info(f"Polling loop ended for {polling_id}")
 
 
 # Notification Callback Implementations
