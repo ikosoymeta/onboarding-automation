@@ -54,6 +54,43 @@ class AgenticResponse:
     suggested_actions: List[str] = None
 
 
+@dataclass
+class PRDraftInfo:
+    """Information about a created PR draft."""
+    pr_number: str
+    pr_url: str
+    status: str  # 'draft' or 'submitted'
+    supplier_name: str
+    amount: float
+    description: str
+    created_at: Optional[datetime] = None
+    submitted_at: Optional[datetime] = None
+
+
+@dataclass
+class PRStatus:
+    """Current status of a PR in approval workflow."""
+    pr_number: str
+    status: str  # draft, submitted, approved, rejected, etc.
+    current_approver: Optional[str] = None
+    approval_chain: List[str] = None
+    po_number: Optional[str] = None
+    blockers: List[str] = None
+    last_updated: Optional[datetime] = None
+
+
+@dataclass
+class SupplierPRReadiness:
+    """Supplier verification result for PR creation."""
+    supplier_name: str
+    exists: bool
+    is_active: bool
+    can_proceed: bool
+    blockers: List[str] = None
+    tpa_status: Optional[str] = None
+    tpa_expiry: Optional[datetime] = None
+
+
 class AgenticBuyingClient:
     """Client for Agentic Buying Intake conversational UI.
     
@@ -74,6 +111,49 @@ class AgenticBuyingClient:
     # Timeouts
     AGENT_RESPONSE_TIMEOUT = 30000  # 30 seconds
     PAGE_LOAD_TIMEOUT = 60000  # 60 seconds
+    
+    # PR Creation Prompt Templates
+    PR_DRAFT_PROMPT_TEMPLATE = """Create a purchase request DRAFT with the following details:
+
+Supplier: {supplier_name}
+Amount: ${amount:,.2f}
+Description: {description}
+Business Justification: {justification}
+Cost Center: {cost_center}
+{delivery_date_line}
+{reference_case_line}
+{attachments_section}
+
+IMPORTANT: Create this as a DRAFT ONLY. Do not submit for approval.
+The user will review the draft and submit manually later.
+Provide the PR number, PR URL, and confirm it is in draft status.
+"""
+
+    PR_SUBMIT_PROMPT_TEMPLATE = """Create a purchase request and SUBMIT FOR APPROVAL IMMEDIATELY with the following details:
+
+Supplier: {supplier_name}
+Amount: ${amount:,.2f}
+Description: {description}
+Business Justification: {justification}
+Cost Center: {cost_center}
+{delivery_date_line}
+{reference_case_line}
+{attachments_section}
+
+IMPORTANT: Submit this PR for approval immediately. Do not leave as draft.
+The PR should enter the approval workflow right away.
+Provide the PR number, PR URL, and confirm it has been submitted.
+"""
+
+    PR_STATUS_CHECK_TEMPLATE = """What is the current status of purchase request {pr_number}?
+
+Please provide:
+1. Current status (draft, submitted, approved, rejected, etc.)
+2. Current approver (if in approval)
+3. Approval chain
+4. PO number (if approved)
+5. Any blockers or issues
+"""
     
     def __init__(
         self, 
@@ -409,6 +489,268 @@ class AgenticBuyingClient:
         )
         
         return self.send_message(prompt)
+
+    def create_pr_draft(
+        self,
+        supplier_name: str,
+        amount: float,
+        description: str,
+        justification: str,
+        cost_center: str,
+        submit_for_approval: bool = False,
+        delivery_date: Optional[str] = None,
+        attachments: List[str] = None,
+        reference_case_id: Optional[str] = None
+    ) -> PRDraftInfo:
+        """Create a PR draft or submit for approval via Agentic Buying Intake.
+        
+        Uses natural language to describe the PR request to the AI assistant,
+        which then creates the PR via the BUY_PURCHASING_AGENT.
+        
+        Args:
+            supplier_name: Name of the supplier
+            amount: PR amount in USD
+            description: Description of goods/services
+            justification: Business justification for the purchase
+            cost_center: Cost center for charging
+            submit_for_approval: If True, submit immediately for approval.
+                               If False, create as draft only.
+            delivery_date: Optional delivery date (YYYY-MM-DD format)
+            attachments: Optional list of file paths to attach (quotes, SOWs, etc.)
+            reference_case_id: Optional reference case ID
+            
+        Returns:
+            PRDraftInfo with PR details including number, URL, and status
+        """
+        logger.info(
+            f"Creating PR {'(submit for approval)' if submit_for_approval else '(draft)'}: "
+            f"{supplier_name}, ${amount:,.2f}"
+        )
+        
+        # Upload attachments first if provided
+        uploaded_docs = []
+        if attachments:
+            for file_path in attachments:
+                try:
+                    doc_id = self.upload_document(file_path)
+                    uploaded_docs.append(doc_id)
+                    logger.info(f"Uploaded document: {file_path} -> {doc_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to upload {file_path}: {e}")
+        
+        # Build the prompt using the appropriate template
+        delivery_date_line = f"Delivery Date: {delivery_date}" if delivery_date else ""
+        reference_case_line = f"Reference Case: {reference_case_id}" if reference_case_id else ""
+        
+        if uploaded_docs:
+            attachments_section = "Attached Documents:\n" + "\n".join(f"- {doc}" for doc in uploaded_docs)
+        elif attachments:
+            # Attachments were provided but failed to upload, list them anyway
+            attachments_section = "Attached Documents:\n" + "\n".join(f"- {att}" for att in attachments)
+        else:
+            attachments_section = ""
+        
+        template = self.PR_SUBMIT_PROMPT_TEMPLATE if submit_for_approval else self.PR_DRAFT_PROMPT_TEMPLATE
+        
+        prompt = template.format(
+            supplier_name=supplier_name,
+            amount=amount,
+            description=description,
+            justification=justification,
+            cost_center=cost_center,
+            delivery_date_line=delivery_date_line,
+            reference_case_line=reference_case_line,
+            attachments_section=attachments_section
+        )
+        
+        # Send the PR creation request
+        response = self.send_message(prompt)
+        
+        # Parse the response to extract PR details
+        # This is a simplified parser - real implementation would need more robust parsing
+        pr_number = self._extract_pr_number(response.message)
+        pr_url = self._extract_pr_url(response.message)
+        status = "submitted" if submit_for_approval else "draft"
+        
+        pr_info = PRDraftInfo(
+            pr_number=pr_number or "UNKNOWN",
+            pr_url=pr_url or "",
+            status=status,
+            supplier_name=supplier_name,
+            amount=amount,
+            description=description,
+            created_at=datetime.utcnow(),
+            submitted_at=datetime.utcnow() if submit_for_approval else None
+        )
+        
+        logger.info(f"PR created: {pr_info.pr_number}, status: {pr_info.status}")
+        return pr_info
+
+    def check_pr_status(self, pr_number: str) -> PRStatus:
+        """Check the current status of a PR via Agentic Buying Intake.
+        
+        Args:
+            pr_number: The PR number to check
+            
+        Returns:
+            PRStatus with current status, approver, and other details
+        """
+        logger.info(f"Checking status for PR: {pr_number}")
+        
+        prompt = self.PR_STATUS_CHECK_TEMPLATE.format(pr_number=pr_number)
+        response = self.send_message(prompt)
+        
+        # Parse the response to extract status details
+        # This is a simplified parser - real implementation would need more robust parsing
+        status = self._parse_pr_status(response.message)
+        current_approver = self._parse_current_approver(response.message)
+        approval_chain = self._parse_approval_chain(response.message)
+        po_number = self._parse_po_number(response.message)
+        blockers = self._parse_blockers(response.message)
+        
+        pr_status = PRStatus(
+            pr_number=pr_number,
+            status=status,
+            current_approver=current_approver,
+            approval_chain=approval_chain,
+            po_number=po_number,
+            blockers=blockers,
+            last_updated=datetime.utcnow()
+        )
+        
+        logger.info(f"PR {pr_number} status: {status}")
+        return pr_status
+
+    def upload_document(self, file_path: str) -> str:
+        """Upload a document to the Buy@ Assistant for PR attachment.
+        
+        Args:
+            file_path: Path to the file to upload (PDF, DOCX, XLSX, images)
+            
+        Returns:
+            Document ID or reference that can be used in PR prompts
+            
+        Raises:
+            AgenticFlowError: If upload fails
+        """
+        if not self._page:
+            raise AgenticFlowError("Browser not started. Call start() first.")
+        
+        if not self._assistant_open:
+            raise AgenticFlowError("Assistant not open. Call open_assistant() first.")
+        
+        logger.info(f"Uploading document: {file_path}")
+        
+        try:
+            # Find the file upload button or area
+            # Based on typical Buy@ Assistant UI, there's usually a paperclip icon
+            upload_button = self._page.locator(
+                'button[aria-label*="attach"], button[aria-label*="upload"], '
+                'input[type="file"]'
+            ).first
+            
+            if upload_button.is_visible(timeout=5000):
+                # If it's a file input, set the file directly
+                if upload_button.get_attribute("type") == "file":
+                    upload_button.set_input_files(file_path)
+                else:
+                    # Click the button and handle file chooser
+                    with self._page.expect_file_chooser() as fc_info:
+                        upload_button.click()
+                    file_chooser = fc_info.value
+                    file_chooser.set_files(file_path)
+                
+                # Wait for upload to complete
+                self._page.wait_for_timeout(2000)
+                
+                # Try to get the document ID from the UI
+                # This may need adjustment based on actual DOM structure
+                doc_id = Path(file_path).name  # Fallback to filename
+                logger.info(f"Document uploaded successfully: {doc_id}")
+                return doc_id
+            else:
+                raise AgenticFlowError("File upload button not found")
+                
+        except PlaywrightTimeoutError as e:
+            self._take_screenshot("upload_timeout")
+            raise AgenticFlowError(f"Failed to upload document: {e}")
+        except Exception as e:
+            self._take_screenshot("upload_error")
+            raise AgenticFlowError(f"Document upload failed: {e}")
+
+    def _extract_pr_number(self, message: str) -> Optional[str]:
+        """Extract PR number from assistant response."""
+        import re
+        # Look for patterns like PR-12345, PR#12345, PR 12345
+        match = re.search(r'PR[-\s#]*(\d+)', message, re.IGNORECASE)
+        if match:
+            return f"PR-{match.group(1)}"
+        return None
+
+    def _extract_pr_url(self, message: str) -> Optional[str]:
+        """Extract PR URL from assistant response."""
+        import re
+        # Look for URLs in the message
+        match = re.search(r'https?://[^\s]+', message)
+        if match:
+            return match.group(0)
+        return None
+
+    def _parse_pr_status(self, message: str) -> str:
+        """Parse PR status from assistant response."""
+        message_lower = message.lower()
+        if "approved" in message_lower:
+            return "approved"
+        elif "rejected" in message_lower:
+            return "rejected"
+        elif "submitted" in message_lower or "pending" in message_lower:
+            return "submitted"
+        elif "draft" in message_lower:
+            return "draft"
+        return "unknown"
+
+    def _parse_current_approver(self, message: str) -> Optional[str]:
+        """Parse current approver from assistant response."""
+        import re
+        # Look for patterns like "Current approver: John Doe" or "Approver: jdoe@meta.com"
+        match = re.search(r'(?:current )?approver[:\s]+([^\n]+)', message, re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+        return None
+
+    def _parse_approval_chain(self, message: str) -> List[str]:
+        """Parse approval chain from assistant response."""
+        import re
+        # Look for approval chain section
+        chain = []
+        # Simple parsing - look for lines with approver names/emails
+        for line in message.split('\n'):
+            if 'approver' in line.lower() or '@' in line:
+                # Extract email or name
+                email_match = re.search(r'[\w\.-]+@[\w\.-]+', line)
+                if email_match:
+                    chain.append(email_match.group(0))
+        return chain
+
+    def _parse_po_number(self, message: str) -> Optional[str]:
+        """Parse PO number from assistant response."""
+        import re
+        match = re.search(r'PO[-\s#]*(\d+)', message, re.IGNORECASE)
+        if match:
+            return f"PO-{match.group(1)}"
+        return None
+
+    def _parse_blockers(self, message: str) -> List[str]:
+        """Parse blockers/issues from assistant response."""
+        blockers = []
+        message_lower = message.lower()
+        if "blocker" in message_lower or "issue" in message_lower or "problem" in message_lower:
+            # Extract lines mentioning blockers
+            for line in message.split('\n'):
+                line_lower = line.lower()
+                if any(word in line_lower for word in ["blocker", "issue", "problem", "missing", "required"]):
+                    blockers.append(line.strip())
+        return blockers
 
 
 class BuyAtClient:
@@ -773,3 +1115,228 @@ class BuyAtClient:
         self._agentic_client.navigate_to_suppliers()
         self._agentic_client.open_assistant()
         logger.info("Agentic Buying session started successfully")
+
+    def create_pr_draft(
+        self,
+        supplier_name: str,
+        amount: float,
+        description: str,
+        justification: str,
+        cost_center: str,
+        submit_for_approval: bool = False,
+        **kwargs
+    ) -> PRDraftInfo:
+        """Create a PR draft or submit for approval via Buy@ Assistant.
+        
+        High-level API that verifies supplier exists and is ready for PR
+        creation before delegating to AgenticBuyingClient.
+        
+        Args:
+            supplier_name: Name of the supplier
+            amount: PR amount in USD
+            description: Description of goods/services
+            justification: Business justification for the purchase
+            cost_center: Cost center for charging
+            submit_for_approval: If True, submit immediately for approval.
+                               If False, create as draft only.
+            **kwargs: Additional arguments passed to AgenticBuyingClient.create_pr_draft
+                     (delivery_date, attachments, reference_case_id)
+            
+        Returns:
+            PRDraftInfo with PR details including number, URL, and status
+            
+        Raises:
+            SupplierNotFoundError: If supplier does not exist
+            BuyAtError: If supplier is not active or not ready for PR
+        """
+        logger.info(
+            f"Creating PR via BuyAtClient: {supplier_name}, "
+            f"${amount:,.2f}, submit={submit_for_approval}"
+        )
+        
+        # Verify supplier exists and is active
+        supplier_info = self.search_supplier(supplier_name, use_cache=False)
+        if not supplier_info.exists:
+            raise SupplierNotFoundError(
+                f"Supplier '{supplier_name}' not found in Buy@. "
+                f"Please invite the supplier first."
+            )
+        
+        if not supplier_info.is_active:
+            raise BuyAtError(
+                f"Supplier '{supplier_name}' exists but is not active. "
+                f"Status: {supplier_info.status}. Please reactivate the supplier first."
+            )
+        
+        # If submitting for approval, verify supplier is ready for PR (TPA check)
+        if submit_for_approval:
+            readiness = self.verify_supplier_for_pr(supplier_name)
+            if not readiness.can_proceed:
+                blockers = ", ".join(readiness.blockers or ["Unknown blocker"])
+                raise BuyAtError(
+                    f"Supplier '{supplier_name}' is not ready for PR creation. "
+                    f"Blockers: {blockers}"
+                )
+        
+        # Ensure agentic client is available
+        if not self.use_agentic or not self._agentic_client:
+            raise BuyAtError(
+                "PR creation requires agentic flow. "
+                "Initialize BuyAtClient with use_agentic=True"
+            )
+        
+        # Start agentic session if not already started
+        if not self._agentic_client.is_started():
+            self.start_agentic_session()
+        
+        # Delegate to AgenticBuyingClient
+        return self._agentic_client.create_pr_draft(
+            supplier_name=supplier_name,
+            amount=amount,
+            description=description,
+            justification=justification,
+            cost_center=cost_center,
+            submit_for_approval=submit_for_approval,
+            **kwargs
+        )
+
+    def verify_supplier_for_pr(self, supplier_name: str) -> SupplierPRReadiness:
+        """Verify if a supplier is ready for PR creation.
+        
+        Checks:
+        - Supplier exists in Buy@
+        - Supplier is active
+        - TPA status (if required)
+        
+        Args:
+            supplier_name: Name of the supplier to verify
+            
+        Returns:
+            SupplierPRReadiness with can_proceed flag and list of blockers
+        """
+        logger.info(f"Verifying supplier PR readiness: {supplier_name}")
+        
+        blockers = []
+        
+        # Check if supplier exists and is active
+        try:
+            supplier_info = self.search_supplier(supplier_name, use_cache=False)
+            exists = supplier_info.exists
+            is_active = supplier_info.is_active
+            
+            if not exists:
+                blockers.append(f"Supplier '{supplier_name}' not found in Buy@")
+            elif not is_active:
+                blockers.append(
+                    f"Supplier '{supplier_name}' is not active (status: {supplier_info.status})"
+                )
+        except SupplierNotFoundError:
+            exists = False
+            is_active = False
+            blockers.append(f"Supplier '{supplier_name}' not found in Buy@")
+        
+        # Check TPA status if supplier exists
+        tpa_status = None
+        tpa_expiry = None
+        if exists and is_active:
+            try:
+                # Try to import TPA client
+                from ..tpa.client import TPAClient
+                tpa_client = TPAClient()
+                tpa_info = tpa_client.get_tpa_status(supplier_name)
+                tpa_status = tpa_info.get("status")
+                tpa_expiry = tpa_info.get("expiry_date")
+                
+                if tpa_status != "active":
+                    blockers.append(f"TPA status is '{tpa_status}' (not active)")
+                elif tpa_expiry and tpa_expiry < datetime.utcnow():
+                    blockers.append(f"TPA expired on {tpa_expiry}")
+            except ImportError:
+                logger.debug("TPA client not available, skipping TPA check")
+            except Exception as e:
+                logger.warning(f"Failed to check TPA status: {e}")
+                # Don't block PR creation if TPA check fails - just warn
+        
+        can_proceed = len(blockers) == 0
+        
+        readiness = SupplierPRReadiness(
+            supplier_name=supplier_name,
+            exists=exists,
+            is_active=is_active,
+            can_proceed=can_proceed,
+            blockers=blockers if blockers else None,
+            tpa_status=tpa_status,
+            tpa_expiry=tpa_expiry
+        )
+        
+        logger.info(
+            f"Supplier PR readiness: {supplier_name}, "
+            f"can_proceed={can_proceed}, blockers={blockers}"
+        )
+        return readiness
+
+    def create_pr_and_monitor(
+        self,
+        supplier_name: str,
+        amount: float,
+        description: str,
+        justification: str,
+        cost_center: str,
+        notification_callback: Optional[Callable] = None,
+        **kwargs
+    ) -> tuple[PRDraftInfo, str]:
+        """Create PR with real submission and start async monitoring.
+        
+        Creates a PR with submit_for_approval=True and starts async polling
+        for approval status. The polling runs in a background thread and
+        invokes the notification_callback when status changes.
+        
+        Args:
+            supplier_name: Name of the supplier
+            amount: PR amount in USD
+            description: Description of goods/services
+            justification: Business justification for the purchase
+            cost_center: Cost center for charging
+            notification_callback: Optional callback invoked on status changes.
+                                 Signature: callback(pr_status: PRStatus, event_type: str)
+                                 event_type: 'submitted', 'approved', 'rejected', 'status_update'
+            **kwargs: Additional arguments (delivery_date, attachments, reference_case_id,
+                     poll_interval, max_duration)
+            
+        Returns:
+            Tuple of (PRDraftInfo, polling_id) for tracking
+        """
+        logger.info(f"Creating PR with monitoring: {supplier_name}, ${amount:,.2f}")
+        
+        # Create PR with real submission
+        pr_info = self.create_pr_draft(
+            supplier_name=supplier_name,
+            amount=amount,
+            description=description,
+            justification=justification,
+            cost_center=cost_center,
+            submit_for_approval=True,
+            **kwargs
+        )
+        
+        # Start async polling with PRPollingManager
+        from .pr_polling import PRPollingManager
+        
+        poll_interval = kwargs.get('poll_interval', 300)
+        max_duration = kwargs.get('max_duration', 86400)
+        
+        manager = PRPollingManager(
+            pr_number=pr_info.pr_number,
+            agentic_client=self._agentic_client,
+            notification_callback=notification_callback,
+            poll_interval=poll_interval,
+            max_duration=max_duration
+        )
+        polling_id = manager.start_polling()
+        
+        logger.info(
+            f"PR created with monitoring: {pr_info.pr_number}, "
+            f"polling_id={polling_id}"
+        )
+        
+        return pr_info, polling_id
