@@ -215,13 +215,7 @@ class CSCAutomation:
         # Sanitize PII for logging
         sanitized_email = self._sanitize_email(worker.email)
         logger.info(f"Onboarding worker: {worker.full_name} ({sanitized_email})")
-            
-        Returns:
-            Worker ID assigned by CSC
-            
-        Raises:
-            FormSubmissionError: If onboarding fails
-        """
+        
         # TODO: Implement worker onboarding
         raise NotImplementedError("Worker onboarding not yet implemented")
     

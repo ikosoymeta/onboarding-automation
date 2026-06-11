@@ -37,7 +37,7 @@ def main():
             job_title="Software Engineer",
             manager_email="manager@meta.com",
             work_location="Remote",
-            phone="+1-555-0123"
+            phone="+1-555-012-3456"
         ),
         WorkerInfo(
             full_name="Jane Smith",
@@ -48,7 +48,7 @@ def main():
             manager_email="manager@meta.com",
             work_location="Onsite",
             office_location="Menlo Park",
-            phone="+1-555-0124"
+            phone="+1-555-012-3457"
         ),
         WorkerInfo(
             full_name="Bob Johnson",
@@ -59,7 +59,7 @@ def main():
             manager_email="manager@meta.com",
             work_location="Hybrid",
             office_location="New York",
-            phone="+1-555-0125"
+            phone="+1-555-012-3458"
         )
     ]
     
